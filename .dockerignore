@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.gitignore
+db.json
+backend/db.json
+.env
+backend/.env
+*.log
+.gemini
+Dockerfile
+.dockerignore
+walkthrough.md
+implementation_plan.md
+task.md
