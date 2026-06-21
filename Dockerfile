@@ -47,8 +47,8 @@ COPY --from=backend-builder /app/backend/dist ./backend/dist
 # Copy built frontend dist folder
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Copy system README for in-app documentation viewer
-COPY README.md ./
+# Copy system README and USER_MANUAL for in-app documentation viewer
+COPY README.md USER_MANUAL.md ./
 
 # Expose backend port
 ENV PORT=8080
