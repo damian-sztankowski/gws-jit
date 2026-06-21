@@ -465,6 +465,16 @@ export async function getLogs(): Promise<AuditLog[]> {
   return db.logs;
 }
 
+export async function getAllLogs(): Promise<AuditLog[]> {
+  if (isFirestore && firestore) {
+    await initDb();
+    const snapshot = await firestore.collection('logs').orderBy('timestamp', 'desc').get();
+    return snapshot.docs.map(doc => doc.data() as AuditLog);
+  }
+  const db = await readDb();
+  return db.logs;
+}
+
 export async function addLog(actor: string, action: string, details: string): Promise<void> {
   const newLog: AuditLog = {
     id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,

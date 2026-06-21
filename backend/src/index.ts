@@ -11,12 +11,14 @@ import {
   saveRequest, 
   updateRequest, 
   getLogs, 
+  getAllLogs,
   addLog,
   getUsers,
   getUserByEmail,
   createUser,
   updateUser,
   deleteUser,
+  hashPassword,
   verifyPassword,
   getSpaces,
   saveSpace,
@@ -24,7 +26,7 @@ import {
 } from './db.js';
 import { listGroups, addGroupMember, removeGroupMember, listGroupMembers } from './google.js';
 import { startScheduler } from './scheduler.js';
-import { JitRequest, User, UserRole, SpaceConfig } from './types.js';
+import { JitRequest, User, UserRole, SpaceConfig, AuditLog } from './types.js';
 import { sendNotification, dispatchTestWebhook } from './notifications.js';
 
 dotenv.config();
@@ -144,6 +146,13 @@ app.post('/api/auth/login', async (req, res) => {
     if (!verifyPassword(password, user.password || '')) {
       console.log(`[AUTH] Password verification failed for: ${email}`);
       return res.status(401).json({ error: "Invalid email or password." });
+    }
+    
+    // Dynamic security upgrade: Upgrade legacy password hash to v2 (210,000 iterations) if verification succeeds
+    if (user.password && !user.password.startsWith('v2:')) {
+      console.log(`[SECURITY] Upgrading legacy password hash to v2 for user: ${email}`);
+      const updatedUser = { ...user, password: hashPassword(password) };
+      await updateUser(user.email, updatedUser);
     }
     
     console.log(`[AUTH] Successful login for: ${email}`);
@@ -573,7 +582,21 @@ app.get('/api/groups', requireAuth, async (req, res) => {
 app.get('/api/requests', requireAuth, async (req, res) => {
   try {
     const requests = await getRequests();
-    res.json(requests);
+    const user = (req as any).user as User;
+    
+    if (user.role === 'ADMIN' || user.role === 'AUDITOR') {
+      return res.json(requests);
+    }
+    
+    const assigned = user.assignedSpaces || [];
+    const filtered = requests.filter(r => {
+      const isOwner = r.requesterEmail.toLowerCase() === user.email.toLowerCase();
+      const rSpace = r.spaceId || 'global';
+      const isInAssignedSpace = assigned.includes(rSpace);
+      return isOwner || isInAssignedSpace;
+    });
+    
+    res.json(filtered);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -625,6 +648,16 @@ app.post('/api/requests', requireAuth, requireRole(['REQUESTER', 'ADMIN']), asyn
     }
 
     const resolvedSettings = await resolveSpaceSettings(groupEmail);
+    const targetSpace = resolvedSettings.spaceId || 'global';
+    
+    if (user.role !== 'ADMIN') {
+      const assigned = user.assignedSpaces || [];
+      if (!assigned.includes(targetSpace)) {
+        return res.status(403).json({ 
+          error: `Access Denied. You are not authorized to submit JIT requests for the space '${resolvedSettings.spaceName}'.` 
+        });
+      }
+    }
 
     // ABAC Guard - Verify User parameters match Group JIT eligibility policy rules (Space-specific or Global)
     const policy = resolvedSettings.groupPolicies.find(p => p.groupEmail.toLowerCase() === groupEmail.toLowerCase());
@@ -903,6 +936,33 @@ app.get('/api/logs', requireAuth, requireRole(['ADMIN', 'AUDITOR']), async (req,
   try {
     const logs = await getLogs();
     res.json(logs);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+app.get('/api/logs/export', requireAuth, requireRole(['ADMIN', 'AUDITOR']), async (req, res) => {
+  try {
+    const logs = await getAllLogs();
+
+    // Format as RFC 4180 compliant CSV
+    const csvRows = [
+      ['ID', 'Timestamp', 'Actor', 'Action', 'Details']
+    ];
+    for (const log of logs) {
+      csvRows.push([
+        log.id,
+        log.timestamp,
+        log.actor,
+        log.action,
+        log.details.replace(/"/g, '""')
+      ]);
+    }
+    const csvContent = csvRows.map(row => row.map(val => `"${val}"`).join(',')).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=gws-jit-audit-logs-${Date.now()}.csv`);
+    res.status(200).send(csvContent);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
