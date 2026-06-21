@@ -972,16 +972,32 @@ app.get('/api/logs/export', requireAuth, requireRole(['ADMIN', 'AUDITOR']), asyn
 app.get('/api/docs', requireAuth, async (req, res) => {
   try {
     const fs = await import('fs/promises');
-    const type = req.query.type === 'readme' ? 'README.md' : 'USER_MANUAL.md';
-    let docPath = path.join(process.cwd(), type);
-    try {
-      await fs.access(docPath);
-    } catch {
-      docPath = path.join(process.cwd(), '..', type);
+    const type = req.query.type === 'manual' ? 'USER_MANUAL.md' : 'README.md';
+    
+    let docPath = '';
+    const possiblePaths = [
+      path.join(process.cwd(), type),
+      path.join(process.cwd(), '..', type),
+      path.join(__dirname, '..', '..', type),
+      path.join(__dirname, '..', type)
+    ];
+    
+    for (const p of possiblePaths) {
+      try {
+        await fs.access(p);
+        docPath = p;
+        break;
+      } catch {}
     }
+    
+    if (!docPath) {
+      throw new Error(`File ${type} not found in any standard location.`);
+    }
+    
     const content = await fs.readFile(docPath, 'utf8');
     res.json({ content });
   } catch (error) {
+    console.error("Documentation read error:", error);
     res.status(500).json({ error: "Failed to read system documentation." });
   }
 });
