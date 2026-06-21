@@ -50,6 +50,68 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
   const [groups, setGroups] = useState<WorkspaceGroup[]>([]);
   const [groupSearchQuery, setGroupSearchQuery] = useState('');
   const [spaceGroupSearchQuery, setSpaceGroupSearchQuery] = useState('');
+  const [manualGroupEmail, setManualGroupEmail] = useState('');
+  const [manualSpaceGroupEmail, setManualSpaceGroupEmail] = useState('');
+
+  const handleManualAddGlobalGroup = () => {
+    const email = manualGroupEmail.trim().toLowerCase();
+    if (!email) return;
+    if (!email.includes('@')) {
+      showToast("Please enter a valid email address.", "error");
+      return;
+    }
+    const exists = groupPolicies.some(p => p.groupEmail.toLowerCase() === email);
+    if (exists) {
+      showToast("This group already has a policy configured.", "error");
+      return;
+    }
+    const inGroups = groups.some(g => g.email.toLowerCase() === email);
+    if (!inGroups) {
+      const name = email.split('@')[0].replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + " Group";
+      setGroups([...groups, {
+        email,
+        name,
+        description: "Manually added Google Group"
+      }]);
+    }
+    setGroupPolicies([...groupPolicies, {
+      groupEmail: email,
+      requiredAttributes: [],
+      autoApproval: false
+    }]);
+    setManualGroupEmail('');
+    showToast(`Added manual group policy for ${email}.`, "success");
+  };
+
+  const handleManualAddSpaceGroup = () => {
+    const email = manualSpaceGroupEmail.trim().toLowerCase();
+    if (!email) return;
+    if (!email.includes('@')) {
+      showToast("Please enter a valid email address.", "error");
+      return;
+    }
+    const exists = spaceGroupPolicies.some(p => p.groupEmail.toLowerCase() === email);
+    if (exists) {
+      showToast("This group already has a policy configured in this Space.", "error");
+      return;
+    }
+    const inGroups = groups.some(g => g.email.toLowerCase() === email);
+    if (!inGroups) {
+      const name = email.split('@')[0].replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + " Group";
+      setGroups([...groups, {
+        email,
+        name,
+        description: "Manually added Space Group"
+      }]);
+    }
+    setSpaceGroupPolicies([...spaceGroupPolicies, {
+      groupEmail: email,
+      requiredAttributes: [],
+      autoApproval: false
+    }]);
+    setManualSpaceGroupEmail('');
+    showToast(`Added manual space group policy for ${email}.`, "success");
+  };
 
   const fetchConfig = async () => {
     try {
@@ -883,6 +945,25 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.45rem' }}>
                   Only checked groups above will be requestable under global settings.
                 </p>
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    className="clean-control"
+                    placeholder="Manually add group email (e.g. ops-group@company.com)..."
+                    value={manualGroupEmail}
+                    onChange={(e) => setManualGroupEmail(e.target.value)}
+                    style={{ fontSize: '0.8rem', padding: '0.45rem 0.75rem', flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="clean-btn clean-btn-secondary"
+                    style={{ padding: '0.45rem 0.9rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                    onClick={handleManualAddGlobalGroup}
+                  >
+                    Add Group Email
+                  </button>
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
@@ -1300,6 +1381,25 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
                           );
                         });
                       })()}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        className="clean-control"
+                        placeholder="Manually add space group email (e.g. engineering@spacea.com)..."
+                        value={manualSpaceGroupEmail}
+                        onChange={(e) => setManualSpaceGroupEmail(e.target.value)}
+                        style={{ fontSize: '0.8rem', padding: '0.45rem 0.75rem', flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        className="clean-btn clean-btn-secondary"
+                        style={{ padding: '0.45rem 0.9rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                        onClick={handleManualAddSpaceGroup}
+                      >
+                        Add Group Email
+                      </button>
                     </div>
                   </div>
 
