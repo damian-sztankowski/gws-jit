@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
-import { BookOpen, Loader2 } from 'lucide-react';
+import { BookOpen, Loader2, HelpCircle, FileText } from 'lucide-react';
 
 export default function Documentation() {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
+  const [docType, setDocType] = useState<'manual' | 'readme'>('manual');
 
   useEffect(() => {
     const fetchDocs = async () => {
+      setLoading(true);
       try {
-        const res = await fetch('/api/docs', {
+        const res = await fetch(`/api/docs?type=${docType}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('jit_token')}`
           }
@@ -26,16 +28,7 @@ export default function Documentation() {
       }
     };
     fetchDocs();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="panel-card" style={{ padding: '3rem', textAlign: 'center' }}>
-        <Loader2 className="logo-icon spin-loader" size={24} style={{ margin: '0 auto' }} />
-        <p style={{ marginTop: '1rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>Loading system documentation...</p>
-      </div>
-    );
-  }
+  }, [docType]);
 
   // Comprehensive Markdown Parser to HTML elements
   const renderMarkdown = (md: string) => {
@@ -255,12 +248,67 @@ export default function Documentation() {
 
   return (
     <section className="panel-card" style={{ maxWidth: '1000px', margin: '0 auto' }}>
-      <div className="panel-header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <BookOpen className="logo-icon" size={18} />
-        <h3>System Documentation & Setup Guide</h3>
+      <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <BookOpen className="logo-icon" size={18} />
+          <h3>System Documentation & Guides</h3>
+        </div>
+        
+        {/* Tab Selector */}
+        <div style={{ display: 'flex', background: 'rgba(15, 23, 42, 0.03)', border: '1px solid rgba(15, 23, 42, 0.05)', borderRadius: '8px', padding: '0.2rem' }}>
+          <button
+            onClick={() => setDocType('manual')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.4rem 0.85rem',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              border: 'none',
+              borderRadius: '6px',
+              background: docType === 'manual' ? 'var(--card-bg)' : 'transparent',
+              color: docType === 'manual' ? 'var(--primary)' : 'var(--text-muted)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              outline: 'none'
+            }}
+          >
+            <HelpCircle size={14} />
+            User Manual
+          </button>
+          <button
+            onClick={() => setDocType('readme')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.4rem 0.85rem',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              border: 'none',
+              borderRadius: '6px',
+              background: docType === 'readme' ? 'var(--card-bg)' : 'transparent',
+              color: docType === 'readme' ? 'var(--primary)' : 'var(--text-muted)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              outline: 'none'
+            }}
+          >
+            <FileText size={14} />
+            Setup & Deployment
+          </button>
+        </div>
       </div>
       <div className="panel-body" style={{ padding: '2rem', maxHeight: '72vh', overflowY: 'auto' }}>
-        {renderMarkdown(content)}
+        {loading ? (
+          <div style={{ padding: '3rem', textAlign: 'center' }}>
+            <Loader2 className="logo-icon spin-loader" size={24} style={{ margin: '0 auto' }} />
+            <p style={{ marginTop: '1rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>Loading content...</p>
+          </div>
+        ) : (
+          renderMarkdown(content)
+        )}
       </div>
     </section>
   );

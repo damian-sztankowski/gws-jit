@@ -972,13 +972,14 @@ app.get('/api/logs/export', requireAuth, requireRole(['ADMIN', 'AUDITOR']), asyn
 app.get('/api/docs', requireAuth, async (req, res) => {
   try {
     const fs = await import('fs/promises');
-    let readmePath = path.join(process.cwd(), 'README.md');
+    const type = req.query.type === 'readme' ? 'README.md' : 'USER_MANUAL.md';
+    let docPath = path.join(process.cwd(), type);
     try {
-      await fs.access(readmePath);
+      await fs.access(docPath);
     } catch {
-      readmePath = path.join(process.cwd(), '..', 'README.md');
+      docPath = path.join(process.cwd(), '..', type);
     }
-    const content = await fs.readFile(readmePath, 'utf8');
+    const content = await fs.readFile(docPath, 'utf8');
     res.json({ content });
   } catch (error) {
     res.status(500).json({ error: "Failed to read system documentation." });
