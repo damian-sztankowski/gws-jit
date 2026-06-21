@@ -4,3 +4,8 @@ db.json
 .env
 *.log
 .DS_Store
+
+# Agent planning & tracking documents
+implementation_plan.md
+task.md
+walkthrough.md
