@@ -1,6 +1,6 @@
-# Walkthrough - OWASP Security Hardening & Audit Logs Export
+# Walkthrough - OWASP Security Hardening, Audit Logs Export & Manual JIT Policies Setup
 
-We have successfully hardened the GWS JIT Access Portal against the findings in the OWASP Top 10 Security Assessment, and implemented a robust audit logs CSV export utility.
+We have successfully hardened the GWS JIT Access Portal against the findings in the OWASP Top 10 Security Assessment, implemented a robust audit logs CSV export utility, and enabled manual JIT group policy setup.
 
 ## Accomplishments
 
@@ -20,6 +20,11 @@ We have successfully hardened the GWS JIT Access Portal against the findings in 
   - Implemented `GET /api/logs/export` in [index.ts](file:///C:/Users/damia/.gemini/antigravity/worktrees/jit-workspace-pulse/jit-google-workspace-solution/backend/src/index.ts#L905) that fetches the entire logs history (with no pagination limit) and formats it into an RFC 4180 compliant CSV stream download.
 - **Frontend Action Button**:
   - Added an **Export Logs (CSV)** button in [App.tsx](file:///C:/Users/damia/.gemini/antigravity/worktrees/jit-workspace-pulse/jit-google-workspace-solution/frontend/src/App.tsx#L761), enabling administrators and auditors to download the entire system log history instantly.
+
+### 3. Usability: Manual JIT Policies Setup
+- **Manual Group Entry Fields**:
+  - Implemented manual group email addition inputs and click handlers in [Settings.tsx](file:///C:/Users/damia/.gemini/antigravity/worktrees/jit-workspace-pulse/jit-google-workspace-solution/frontend/src/components/Settings.tsx#L50) for both Global Policies and Space Settings dashboards.
+  - Allows administrators to JIT-enable any arbitrary Google Group by email even when the Directory API group listing synchronization is not configured or fails.
 
 ---
 
