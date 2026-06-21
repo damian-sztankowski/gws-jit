@@ -263,13 +263,18 @@ function App() {
                   onChange={(e) => setActiveSpaceId(e.target.value)}
                 >
                   {(user.role === 'ADMIN' || (user.assignedSpaces || []).includes('global')) && (
-                    <option value="global">Global Config ({config?.domain || 'system'})</option>
-                  )}
-                  {accessibleSpaces.map(space => (
-                    <option key={space.id} value={space.id}>
-                      {space.name} ({space.domain})
+                    <option value="global">
+                      Global Config ({config?.domain ? (config.domain.length > 14 ? `${config.domain.substring(0, 11)}...` : config.domain) : 'system'})
                     </option>
-                  ))}
+                  )}
+                  {accessibleSpaces.map(space => {
+                    const displayDomain = space.domain.length > 14 ? `${space.domain.substring(0, 11)}...` : space.domain;
+                    return (
+                      <option key={space.id} value={space.id}>
+                        {space.name} ({displayDomain})
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
