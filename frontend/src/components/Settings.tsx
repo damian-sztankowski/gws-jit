@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Database, Save, ShieldAlert, Loader2, X, Plus, Trash2, Edit, Bell, Globe, ClipboardCheck, Send } from 'lucide-react';
+import { Settings, Database, Save, ShieldAlert, Loader2, X, Plus, Trash2, Edit, Bell, Globe, ClipboardCheck, Send, Eye, EyeOff } from 'lucide-react';
 import { AppConfig, WorkspaceGroup, GroupJitPolicy, SpaceConfig } from '../types.ts';
 
 interface SettingsProps {
@@ -45,6 +45,10 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
   const [spaceServiceAccountEmail, setSpaceServiceAccountEmail] = useState('');
   const [authMethod, setAuthMethod] = useState<'wif' | 'json'>('wif');
   const [spaceAuthMethod, setSpaceAuthMethod] = useState<'wif' | 'json'>('wif');
+  const [showAdminEmail, setShowAdminEmail] = useState(false);
+  const [showSAEmail, setShowSAEmail] = useState(false);
+  const [showSpaceAdminEmail, setShowSpaceAdminEmail] = useState(false);
+  const [showSpaceSAEmail, setShowSpaceSAEmail] = useState(false);
 
   // Search filter states
   const [groups, setGroups] = useState<WorkspaceGroup[]>([]);
@@ -616,15 +620,36 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
 
                   <div className="form-input-group">
                     <label htmlFor="adminEmail">Delegated Operator Email (Option A - Restricted Role Recommended)</label>
-                    <input
-                      id="adminEmail"
-                      type="email"
-                      className="clean-control"
-                      placeholder="operator@company.com"
-                      value={adminEmail}
-                      onChange={(e) => setAdminEmail(e.target.value)}
-                      required
-                    />
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
+                      <input
+                        id="adminEmail"
+                        type={showAdminEmail ? "email" : "password"}
+                        className="clean-control"
+                        placeholder="operator@company.com"
+                        value={adminEmail}
+                        onChange={(e) => setAdminEmail(e.target.value)}
+                        style={{ paddingRight: '2.5rem' }}
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminEmail(!showAdminEmail)}
+                        style={{
+                          position: 'absolute',
+                          right: '0.75rem',
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--text-dim)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 0
+                        }}
+                      >
+                        {showAdminEmail ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                     <p style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
                       Email address of the delegated operator account in the Workspace domain. To minimize security risks, it is strongly recommended to use a standard user account assigned a <strong>Custom Admin Role</strong> containing only group member management privileges.
                     </p>
@@ -633,15 +658,36 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
                   {authMethod === 'wif' ? (
                     <div className="form-input-group">
                       <label htmlFor="serviceAccountEmail">Workspace Delegation Service Account Email</label>
-                      <input
-                        id="serviceAccountEmail"
-                        type="email"
-                        className="clean-control"
-                        placeholder="workspace-sa@your-project.iam.gserviceaccount.com"
-                        value={serviceAccountEmail}
-                        onChange={(e) => setServiceAccountEmail(e.target.value)}
-                        required
-                      />
+                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
+                        <input
+                          id="serviceAccountEmail"
+                          type={showSAEmail ? "email" : "password"}
+                          className="clean-control"
+                          placeholder="workspace-sa@your-project.iam.gserviceaccount.com"
+                          value={serviceAccountEmail}
+                          onChange={(e) => setServiceAccountEmail(e.target.value)}
+                          style={{ paddingRight: '2.5rem' }}
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSAEmail(!showSAEmail)}
+                          style={{
+                            position: 'absolute',
+                            right: '0.75rem',
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--text-dim)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 0
+                          }}
+                        >
+                          {showSAEmail ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
                       <p style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
                         Enter the keyless Service Account Email configured with Domain-Wide Delegation. Ensure the portal's running identity has the <strong>Service Account Token Creator</strong> role on this account.
                       </p>
@@ -1129,15 +1175,36 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
 
                   <div className="form-input-group">
                     <label htmlFor="spaceAdminEmail">Delegated Operator Email (Option A - Restricted Role Recommended)</label>
-                    <input
-                      id="spaceAdminEmail"
-                      type="email"
-                      className="clean-control"
-                      placeholder="operator@tenant-a.com"
-                      value={spaceAdminEmail}
-                      onChange={(e) => setSpaceAdminEmail(e.target.value)}
-                      required
-                    />
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
+                      <input
+                        id="spaceAdminEmail"
+                        type={showSpaceAdminEmail ? "email" : "password"}
+                        className="clean-control"
+                        placeholder="operator@tenant-a.com"
+                        value={spaceAdminEmail}
+                        onChange={(e) => setSpaceAdminEmail(e.target.value)}
+                        style={{ paddingRight: '2.5rem' }}
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSpaceAdminEmail(!showSpaceAdminEmail)}
+                        style={{
+                          position: 'absolute',
+                          right: '0.75rem',
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--text-dim)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 0
+                        }}
+                      >
+                        {showSpaceAdminEmail ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                     <p style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem' }}>
                       Email of the delegated operator account for this Space. It is strongly recommended to use a standard user assigned a custom role with only group member modification rights.
                     </p>
@@ -1182,14 +1249,35 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
                   {spaceAuthMethod === 'wif' ? (
                     <div className="form-input-group">
                       <label htmlFor="spaceSaEmail">Workspace Delegation Service Account Email</label>
-                      <input
-                        id="spaceSaEmail"
-                        type="email"
-                        className="clean-control"
-                        placeholder="workspace-sa@tenant-a.iam.gserviceaccount.com"
-                        value={spaceServiceAccountEmail}
-                        onChange={(e) => setSpaceServiceAccountEmail(e.target.value)}
-                      />
+                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
+                        <input
+                          id="spaceSaEmail"
+                          type={showSpaceSAEmail ? "email" : "password"}
+                          className="clean-control"
+                          placeholder="workspace-sa@tenant-a.iam.gserviceaccount.com"
+                          value={spaceServiceAccountEmail}
+                          onChange={(e) => setSpaceServiceAccountEmail(e.target.value)}
+                          style={{ paddingRight: '2.5rem' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSpaceSAEmail(!showSpaceSAEmail)}
+                          style={{
+                            position: 'absolute',
+                            right: '0.75rem',
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--text-dim)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 0
+                          }}
+                        >
+                          {showSpaceSAEmail ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
                       <p style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem' }}>
                         Enter the Workspace Delegation Service Account Email. If left blank, this Space will fall back to using global credentials.
                       </p>
