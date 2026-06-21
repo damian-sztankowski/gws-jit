@@ -236,9 +236,11 @@ export default function Documentation() {
       if (token.startsWith('[') && token.includes('](') && token.endsWith(')')) {
         const midIdx = token.indexOf('](');
         const linkText = token.slice(1, midIdx);
-        const url = token.slice(midIdx + 2, -1);
+        const url = token.slice(midIdx + 2, -1).trim();
+        const isMalicious = url.toLowerCase().startsWith('javascript:') || url.toLowerCase().startsWith('data:');
+        const safeUrl = isMalicious ? '#' : url;
         return (
-          <a key={i} href={url} target={url.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" style={{
+          <a key={i} href={safeUrl} target={safeUrl.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" style={{
             color: 'var(--primary)',
             textDecoration: 'underline',
             fontWeight: '500'

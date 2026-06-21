@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Clock, Settings, Users, ClipboardList, Database, LogOut, RefreshCw, Globe, BookOpen } from 'lucide-react';
+import { Clock, Settings, Users, ClipboardList, Database, LogOut, RefreshCw, Globe, BookOpen, Download } from 'lucide-react';
 import Dashboard from './components/Dashboard.tsx';
 import Request from './components/Request.tsx';
 import SettingsView from './components/Settings.tsx';
@@ -712,6 +712,33 @@ function AuditTrailView({ showToast, refreshTrigger }: { showToast: any; refresh
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const handleExport = async () => {
+    const activeToken = localStorage.getItem('jit_token');
+    if (!activeToken) return;
+    try {
+      showToast("Preparing audit logs CSV export...", "info");
+      const res = await fetch('/api/logs/export', {
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `gws-jit-audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        showToast("Audit logs exported successfully.", "success");
+      } else {
+        showToast("Failed to export audit logs.", "error");
+      }
+    } catch (err) {
+      showToast("Error downloading audit logs export.", "error");
+    }
+  };
+
   const fetchLogs = async () => {
     const activeToken = localStorage.getItem('jit_token');
     if (!activeToken) return;
@@ -760,16 +787,35 @@ function AuditTrailView({ showToast, refreshTrigger }: { showToast: any; refresh
   }
 
   return (
-    <div className="aesthetic-table-wrapper" style={{ maxHeight: '350px', overflowY: 'auto' }}>
-      <table className="aesthetic-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Actor</th>
-            <th>Action</th>
-            <th>Details</th>
-          </tr>
-        </thead>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.8rem' }}>
+        <button 
+          onClick={handleExport}
+          className="btn btn-secondary" 
+          style={{ 
+            fontSize: '0.75rem', 
+            padding: '0.35rem 0.75rem', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.35rem',
+            background: 'var(--bg-glass)',
+            border: '1px solid var(--border-color)',
+            color: 'var(--text-muted)'
+          }}
+        >
+          <Download size={14} /> Export Logs (CSV)
+        </button>
+      </div>
+      <div className="aesthetic-table-wrapper" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+        <table className="aesthetic-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Actor</th>
+              <th>Action</th>
+              <th>Details</th>
+            </tr>
+          </thead>
         <tbody>
           {logs.map(log => (
             <tr key={log.id}>
@@ -789,6 +835,7 @@ function AuditTrailView({ showToast, refreshTrigger }: { showToast: any; refresh
           ))}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }

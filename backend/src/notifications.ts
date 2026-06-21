@@ -1,3 +1,4 @@
+import dns from 'dns/promises';
 import { getConfig, getSpaces } from './db.js';
 
 export interface NotificationPayload {
@@ -11,6 +12,50 @@ export interface NotificationPayload {
     justification: string;
     status: string;
   };
+}
+
+function isPrivateIp(ip: string): boolean {
+  if (ip === '127.0.0.1' || ip === '::1' || ip.startsWith('127.')) {
+    return true;
+  }
+  if (ip.startsWith('10.')) return true;
+  if (ip.startsWith('172.')) {
+    const parts = ip.split('.');
+    if (parts.length >= 2) {
+      const secondPart = parseInt(parts[1], 10);
+      if (secondPart >= 16 && secondPart <= 31) {
+        return true;
+      }
+    }
+  }
+  if (ip.startsWith('192.168.')) return true;
+  if (ip.startsWith('169.254.')) return true;
+  if (ip.toLowerCase().startsWith('fe80:')) return true;
+  if (ip.toLowerCase().startsWith('fc00:') || ip.toLowerCase().startsWith('fd00:')) return true;
+  return false;
+}
+
+export async function validateWebhookUrl(urlStr: string): Promise<void> {
+  const url = new URL(urlStr);
+  if (url.protocol !== 'https:') {
+    throw new Error("Webhook URL must use secure HTTPS protocol.");
+  }
+  
+  const hostname = url.hostname;
+  let ipAddress: string;
+  try {
+    const lookup = await dns.lookup(hostname);
+    ipAddress = lookup.address;
+  } catch (err) {
+    throw new Error(`Failed to resolve hostname '${hostname}': ${(err as Error).message}`);
+  }
+  
+  const isProd = process.env.NODE_ENV === 'production' || process.env.AUTH_MODE === 'IAP';
+  if (isProd) {
+    if (isPrivateIp(ipAddress)) {
+      throw new Error(`SSRF Guard: Outbound request to private/internal IP address '${ipAddress}' is blocked.`);
+    }
+  }
 }
 
 export async function sendNotification(groupEmail: string, payload: NotificationPayload): Promise<void> {
@@ -49,6 +94,10 @@ export async function sendNotification(groupEmail: string, payload: Notification
 
   try {
     console.log(`[NOTIFICATION] Dispatching webhook to ${targetName} (${webhookUrl})...`);
+    
+    // Validate Webhook URL against SSRF and protocol rules
+    await validateWebhookUrl(webhookUrl);
+
     const isSlack = webhookUrl.toLowerCase().includes('slack.com');
     
     let textPayload = '';
@@ -84,6 +133,9 @@ export async function sendNotification(groupEmail: string, payload: Notification
 
 export async function dispatchTestWebhook(webhookUrl: string): Promise<void> {
   if (!webhookUrl) return;
+
+  // Validate Webhook URL against SSRF and protocol rules
+  await validateWebhookUrl(webhookUrl);
 
   const title = "Webhook Connection Test";
   const message = "Your GWS JIT Access Portal webhook integration is configured successfully! 🚀";
