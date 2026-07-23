@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -45,6 +46,23 @@ if (!isProd) {
   console.log("[CORS] Production/IAP mode: CORS disabled (served from same origin)");
 }
 app.use(express.json());
+
+// Security Rate Limiters
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts, please try again after 15 minutes.' }
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' }
+});
 
 // Memory map for user sessions (token -> email)
 const SESSIONS = new Map<string, string>();
@@ -125,7 +143,7 @@ const requireRole = (allowedRoles: UserRole[]) => {
 };
 
 // 1. Authentication Endpoints
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -637,7 +655,7 @@ async function resolveSpaceSettings(groupEmail: string) {
   };
 }
 
-app.post('/api/requests', requireAuth, requireRole(['REQUESTER', 'ADMIN']), async (req, res) => {
+app.post('/api/requests', apiLimiter, requireAuth, requireRole(['REQUESTER', 'ADMIN']), async (req, res) => {
   try {
     const { groupEmail, groupName, justification, durationMinutes, spaceId } = req.body;
     const user = (req as any).user as User;

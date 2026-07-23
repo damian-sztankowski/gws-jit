@@ -32,6 +32,16 @@ export default function UserManagement({ currentUser, showToast, refreshTrigger,
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isModalOpen) {
+        setIsModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isModalOpen]);
+
   const fetchSpaces = async () => {
     const token = localStorage.getItem('jit_token');
     if (!token) return;
@@ -277,6 +287,7 @@ export default function UserManagement({ currentUser, showToast, refreshTrigger,
                         onClick={() => openEditModal(u)} 
                         style={{ padding: '0.3rem 0.5rem' }}
                         title="Edit User"
+                        aria-label={`Edit user profile for ${u.email}`}
                       >
                         <Edit2 size={12} />
                       </button>
@@ -286,6 +297,7 @@ export default function UserManagement({ currentUser, showToast, refreshTrigger,
                         style={{ padding: '0.3rem 0.5rem', color: u.email.toLowerCase() === currentUser.email.toLowerCase() ? 'var(--text-dim)' : 'var(--status-denied)' }}
                         disabled={u.email.toLowerCase() === currentUser.email.toLowerCase()}
                         title="Delete User"
+                        aria-label={`Delete user profile for ${u.email}`}
                       >
                         <Trash2 size={12} />
                       </button>
@@ -307,7 +319,7 @@ export default function UserManagement({ currentUser, showToast, refreshTrigger,
                 <UserIcon className="logo-icon" size={16} />
                 {editingUser ? 'Edit User Profile' : 'Create New User Profile'}
               </h3>
-              <button className="modal-close-btn" onClick={() => setIsModalOpen(false)}>
+              <button className="modal-close-btn" onClick={() => setIsModalOpen(false)} aria-label="Close modal window">
                 <X size={16} />
               </button>
             </div>
