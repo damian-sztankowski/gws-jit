@@ -1,89 +1,92 @@
-# GWS JIT Access Portal - User Manual & Settings Reference
+# GWS JIT Access Portal: User Manual & Configuration Reference
 
-This manual provides a detailed reference and explanation of every configuration option, user role, and setting in the GWS JIT Access Portal.
+This reference manual provides a granular breakdown of the configurations, architecture options, user roles, and access controls within the Google Workspace (GWS) Just-In-Time (JIT) Access Portal.
 
 ---
 
 ## 1. Access Command Center & JIT Requests
 
-The **Command Center** is the main dashboard where users request time-bound group elevations and review their active/pending requests.
+The **Command Center** serves as the primary end-user dashboard for requesting time-bound group elevations and monitoring request states.
 
-* **Active Space Selection**: Specifies the context for your workspace (Global vs. Specific Tenant). Changing the space filters the available JIT groups and request listings.
-* **Select JIT Group**: The target Google Group you want to join. Only groups with configured JIT policies in the active Space will be displayed.
-* **Duration**: The time limit for group membership. Once this time expires, the background scheduler automatically revokes access.
-* **Justification**: A mandatory description detailing why elevation is required. This justification is logged permanently for security auditing.
+*   **Active Space Selection:** Sets the tenant context (e.g., Global vs. Specific Child Tenant). Filtering by Space dynamically restricts visible JIT groups and logs.
+*   **Select JIT Group:** The target Google Group for temporary membership. Only groups tied to an active JIT policy within the selected Space are visible.
+*   **Duration:** The TTL (Time-To-Live) for group membership. Upon expiration, a background worker automatically revokes directory access.
+*   **Justification:** A mandatory text entry specifying the business or technical reason for elevation. This is permanently written to the immutable audit trail.
 
 ---
 
-## 2. Portal Settings - System Config
+## 2. Portal Settings — System Configuration
 
-Only users with the **ADMIN** role can access and modify settings.
+> ⚠️ **Access Control:** This section is restricted exclusively to identities holding the `ADMIN` role.
 
 ### Core Settings
-* **Engine Mode**:
-  * `MOCK`: Simulates Google Directory API changes in memory. Ideal for local testing and configuration verification.
-  * `LIVE`: Provisions real group membership additions and removals in the live Google Workspace directory.
-* **Workspace Domain**: The primary G Suite/Workspace domain managed by this installation (e.g., `company.com`).
-* **Delegated Operator Email**: A standard Workspace account (non-super-admin is recommended) configured with group management privileges. The GCP Service Account impersonates this email to modify group memberships using Domain-Wide Delegation.
-* **Access Review Attestation Interval (Days)**: The period (default: `90` days) after which a group policy requires administrator re-certification.
+*   **Engine Mode:**
+    *   `MOCK`: Simulates Google Directory API operations in-memory. Recommended for local sandboxing and testing policy logic.
+    *   `LIVE`: Executes real-time `Directory.Members.insert()` and `delete()` operations against the live production Google Workspace directory.
+*   **Workspace Domain:** The primary managed G Suite/Google Workspace domain (e.g., `company.com`).
+*   **Delegated Operator Email:** A standard Google Workspace account (non-Super-Admin recommended) granted explicit group management privileges. The underlying GCP Service Account impersonates this user via **Domain-Wide Delegation (DWD)**.
+*   **Access Review Attestation Interval (Days):** The sliding compliance window (Default: `90` days) before a group configuration triggers a mandatory administrative re-certification.
 
 ### Integration & Alerts
-* **Global Webhook Notification URL**: Fallback Slack, Teams, or Google Chat incoming webhook URL. The portal posts JSON alerts on request states (`PENDING`, `APPROVED`, `DENIED`, `REVOKED`/`EXPIRED`).
-* **Test Webhook Button**: Verifies network connectivity and payload formats by firing a test notification instantly.
+*   **Global Webhook Notification URL:** The fallback webhook destination (Slack, Microsoft Teams, or Google Chat). The portal dispatches structured JSON payloads capturing lifecycle state transitions: `PENDING` $\rightarrow$ `APPROVED` / `DENIED` $\rightarrow$ `REVOKED` / `EXPIRED`.
+*   **Test Webhook Button:** Fires a synthetic payload to validate endpoint end-to-end network connectivity and schema parsing.
 
-### Credentials Configuration
-* **Workload Identity Federation (Keyless)**: Recommended keyless authentication method. The JIT Portal exchanges its ambient GCP compute identity for a temporary delegation token.
-  * *Required Input:* **Workspace Delegation Service Account Email**
-* **Service Account JSON / WIF Config**: Traditional credentials method. Paste the complete service account JSON private key file content.
-
----
-
-## 3. Portal Settings - Global Policies
-
-Manage JIT access rules applied globally to the primary Workspace domain.
-
-* **Group JIT Policy List**: Displays Google Groups discovered via the Directory API or added manually.
-* **⚡ Pre-Approved Option**: If enabled, JIT requests to join this group bypass the Approver review queue. The system provisions group membership immediately.
-* **Required Attribute Tags**: Attribute tags that a user must possess to be eligible to request this group (Attribute-Based Access Control).
-* **Manual Add Group**: Allows administrators to configure policies for arbitrary group emails directly, bypassing Directory API listing synchronization.
+### Identity & Credentials Architecture
+*   **Workload Identity Federation (Keyless - Recommended):** Bypasses static JSON key hazards. The JIT Portal exchanges its ambient runtime GCP identity (e.g., GKE or Compute Engine) for short-lived delegation tokens.
+    *   *Requirement:* **Workspace Delegation Service Account Email**
+*   **Service Account JSON / WIF Config:** Legacy cryptographic authentication. Requires pasting the raw, unencrypted contents of a GCP Service Account private key file.
 
 ---
 
-## 4. Portal Settings - Spaces (Multi-Tenant)
+## 3. Portal Settings — Global Policies
 
-Spaces allow Managed Service Providers (MSPs) and large enterprises to isolate separate Workspace domains, JIT policies, and notifications.
+Global Policies define the baseline Attribute-Based Access Control (ABAC) rules for the root Workspace domain.
 
-* **Space Name**: Unique label for the tenant environment.
-* **Space Domain**: The specific Workspace domain assigned to this Space.
-* **Delegated Operator Email**: Tenant-specific administrator account for impersonation.
-* **Space Webhook URL**: Route alerts (like approvals and warnings) to tenant-specific Slack/Teams channels.
-* **Credentials JSON Override**: Paste a dedicated service account JSON key to route API calls using the tenant's own GCP credentials. If left blank, it falls back to the global credentials.
-
----
-
-## 5. Portal Settings - Access Reviews & Attestation
-
-To satisfy SOC2 and ISO compliance requirements, JIT group policies must be periodically reviewed and re-certified.
-
-* **JIT Policy Listing**: Displays configured policies, their last attested timestamp, and the user who certified them.
-* **Certify Button**: Performs a compliance attestation audit:
-  1. Extends the policy's next due date by the attestation interval.
-  2. Queries the Directory API for active members in the Google Group.
-  3. Matches members against active requests database.
-  4. Flags **orphaned access** (members added out-of-band directly in GWS instead of the JIT portal) and dispatches webhook alerts.
+*   **Group JIT Policy List:** An inventory of Google Groups synced automatically via the Directory API or registered through manual overrides.
+*   **⚡ Pre-Approved Option:** Bypasses manual `APPROVER` intervention. When enabled, requests to join this group are automatically validated against ABAC tags and instantly provisioned.
+*   **Required Attribute Tags:** Key-value markers a requester's profile must feature to qualify for elevation (e.g., `team: devops`).
+*   **Manual Add Group:** Allows admins to force-register arbitrary target group emails, bypassing the broader Directory API sync loop.
 
 ---
 
-## 6. User Accounts & Attribute-Based Access Control (ABAC)
+## 4. Portal Settings — Spaces (Multi-Tenancy)
 
-Manage user profiles, permissions, and security roles.
+Spaces offer structural isolation tailored for Managed Service Providers (MSPs) and large enterprises requiring distinct boundary lines for child domains, specific policies, and logging pipelines.
 
-### User Roles
-* **ADMIN**: Full system rights. Can view/modify settings, manage users, request JIT, and approve memberships.
-* **APPROVER**: Reviewers who approve or deny pending requests. They cannot submit requests for themselves or modify system settings.
-* **REQUESTER**: Standard users. They can request time-bound elevations and view their own request dashboard.
-* **AUDITOR**: Read-only access to the Central Security Audit Trail. They cannot request, approve, or change settings.
+| Configuration Field | Technical Purpose |
+| :--- | :--- |
+| **Space Name** | Logical unique identifier for the specific tenant environment. |
+| **Space Domain** | The specific isolated Workspace domain bound to this Space. |
+| **Delegated Operator Email** | Tenant-specific administrator account used for DWD impersonation. |
+| **Space Webhook URL** | Dedicated notification routing for tenant-isolated Slack/Teams channels. |
+| **Credentials JSON Override** | Optional isolated GCP Service Account key text field. If unconfigured, the Space defaults to the global system credentials. |
 
-### ABAC Attribute Tags
-* **Eligible Attributes**: Defined under *Settings > System Config*, these are system-wide tag keys (e.g. `oncall`, `cdt`, `security`).
-* **User Attribute Assignment**: Edit a user's account to assign tags. The user must possess *all* attribute tags required by a JIT policy to request that group.
+---
+
+## 5. Access Reviews & Compliance Attestation
+
+To maintain SOC2 Type II and ISO 27001 readiness, JIT policies undergo recurring verification to prevent access drift.
+
+*   **JIT Policy Listing:** A central registry displaying active policies, historical attestation timestamps, and the identity of the certifying administrator.
+*   **Certify Button:** Triggers an automated multi-step compliance reconciliation audit:
+    1. Resets the policy expiration clock by the configured Attestation Interval.
+    2. Queries the live Google Workspace Directory API for actual current group membership.
+    3. Cross-references real-time membership against the active requests database.
+    4. **Drift Identification:** Flags **orphaned access** (members added directly via admin console out-of-band) and alerts security teams via webhooks.
+
+---
+
+## 6. IAM Roles & Attribute-Based Access Control (ABAC)
+
+### Platform Roles
+
+| Role Badge | Privileges | Scope |
+| :--- | :--- | :--- |
+| `[ ADMIN ]` | Full Read/Write, System Mutation, User Management, Request, Approve | Global / All Spaces |
+| `[ APPROVER ]` | Read-only to configurations; Can approve/deny pending request queues | Assigned Spaces |
+| `[ REQUESTER ]` | Read-only to self dashboard; Can initiate elevation requests | Assigned Spaces |
+| `[ AUDITOR ]` | Read-only access to system logs, policies, and the Security Audit Trail | Global / All Spaces |
+
+### ABAC Engine Construction
+*   **Eligible Attributes:** System-wide schema keys declared globally within *System Config* (e.g., `oncall`, `clearance_level`, `region`).
+*   **User Attribute Assignment:** Administrators map specific attribute values to user records. For a user to successfully request a JIT group, their assigned profile attributes must **completely satisfy** the criteria configured on the target group's JIT policy.
