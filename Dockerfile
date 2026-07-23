@@ -49,6 +49,9 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Copy system README and USER_MANUAL for in-app documentation viewer
 COPY README.md USER_MANUAL.md ./
+# Set file ownership and run as non-root user for security container hardening
+RUN chown -R node:node /app
+USER node
 
 # Expose backend port
 ENV PORT=8080

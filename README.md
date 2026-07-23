@@ -8,6 +8,24 @@ Instead of keeping permanent standing privileges (such as standing "Super Admin"
 
 ---
 
+## ⚡ 3-Minute Quickstart
+
+Evaluate the portal locally in **MOCK** mode in seconds:
+
+```bash
+# Clone repository & launch in development mode
+git clone https://github.com/damian-sztankowski/gws-jit.git && cd gws-jit && npm install && npm run dev
+```
+
+Or run via Docker:
+```bash
+docker build -t gws-jit . && docker run -p 8080:8080 gws-jit
+```
+
+Navigate to **http://localhost:3000** (or `http://localhost:8080` for Docker). Default login: `superadmin@company.com` / `password`.
+
+---
+
 ## Table of Contents
 - [Key Features](#key-features)
 - [Tech Stack](#tech-stack)
@@ -71,68 +89,54 @@ Open your browser and navigate to **[http://localhost:3000](http://localhost:300
 ## Enterprise Google Cloud Deployment Guide
 
 This guide walks you through deploying the GWS JIT Access Portal to Google Cloud using **Cloud Run**, **Firestore**, and **Identity-Aware Proxy (IAP)**.
+### Prerequisites & Required IAM Roles
+
+#### Required CLI Tools
+* **`gcloud` CLI** (v450.0.0+): For Google Cloud deployment and Workload Identity configuration.
+* **`docker` Engine** (v24.0+): For building container images locally.
+* **`node`** (v18.0+) & **`npm`** (v9.0+): For local development and testing.
+
+#### Minimal GCP IAM Permissions
+When deploying the portal to Cloud Run under an ambient Service Account, grant the following least-privilege IAM roles:
+* `roles/datastore.user` (Cloud Datastore / Firestore User): Required to read and write policy, request, and log state.
+* `roles/iam.serviceAccountTokenCreator` (Service Account Token Creator): Required for Workload Identity keyless authentication to sign JWT assertions for Workspace OAuth2 token exchange.
+
+---
 
 ### Architecture Overview
 
-```
-+----------------------------------------------------------------------------------------------------+
-|                                      PORTAL ARCHITECTURE & DATA FLOW                                |
-+----------------------------------------------------------------------------------------------------+
+```mermaid
+graph TD
+    subgraph Clients["Users & Clients"]
+        User["Requesters / Admins / Approvers / Auditors"]
+    end
 
-  [ Requesters / Admins ]        [ Approvers / Auditors ]
-             |                              |
-             +---------------+--------------+
-                             |
-                             v
-               +---------------------------+
-               |  HTTPS External ALB       |
-               |  (Google Cloud L7 LB)     |
-               +---------------------------+
-                             |
-                             |  [ Enforces Identity-Aware Proxy (IAP) ]
-                             v
-               +---------------------------+
-               |      Google Cloud         |
-               |  Identity-Aware Proxy     | <--- Authenticates via Workspace/GCP Identity
-               +---------------------------+
-                             |
-                             |  [ Signed JWT Header (x-goog-iap-jwt-assertion) ]
-                             v
-+----------------------------+-----------------------------------------------------------------------+
-|  CLOUD RUN RUNTIME BOUNDARY                                                                        |
-|                                                                                                    |
-|    +----------------------------+             +----------------------------------+                 |
-|    |    Vite React Frontend     |             |      Express REST API            |                 |
-|    |    (Single Page App)       | <---------> |      (Node.js Server)            |                 |
-|    +----------------------------+             +----------------------------------+                 |
-+---------------------------------------------------------------|------------------|-----------------+
-                                                                |                  |
-                       [ Reads & Writes Policy/Request State ]  |                  | [ exchanges JWT for access token ]
-                                                                v                  v
-                                                 +----------------------+  +-----------------------+
-                                                 | Google Cloud         |  | Google Cloud          |
-                                                 | Firestore Database   |  | IAM Credentials API   |
-                                                 +----------------------+  +-----------------------+
-                                                                                       |
-                                                                                       | [ Delegate Access Token ]
-                                                                                       v
-                                                                           +-----------------------+
-                                                                           | Google Workspace      |
-                                                                           | Admin SDK (Directory) |
-                                                                           +-----------------------+
-                                                                                       |
-                                                                                       | [ Provisions JIT Group Membership ]
-                                                                                       v
-                                                                           +-----------------------+
-                                                                           | Target Workspace      |
-                                                                           | Directory Group       |
-                                                                           +-----------------------+
-                                                                                       |
-                                                                                       | [ Dispatches JSON Alerts ]
-                                                                                       v
-                                                                           +-----------------------+
-                                                                           | Slack / Teams Webhook |
-                                                                           +-----------------------+
+    subgraph GCP_Perimeter["GCP Perimeter & Ingress"]
+        ALB["HTTPS External Load Balancer"]
+        IAP["Google Cloud Identity-Aware Proxy (IAP)"]
+    end
+
+    subgraph CloudRun["Cloud Run Service Container"]
+        FE["Vite React Frontend (SPA)"]
+        BE["Express REST API (Node.js Engine)"]
+    end
+
+    subgraph GCP_Workspace_Services["GCP & Workspace Services"]
+        Firestore[("Google Cloud Firestore")]
+        IAM_Creds["Google IAM Credentials API (WIF)"]
+        Workspace["Google Workspace Directory API"]
+        Webhook["Slack / MS Teams Webhook"]
+    end
+
+    User -->|HTTPS| ALB
+    ALB -->|Enforces SSO| IAP
+    IAP -->|Signed JWT Assertion| FE
+    FE <-->|REST API Calls| BE
+    BE -->|Read/Write State| Firestore
+    BE -->|Keyless Sign JWT| IAM_Creds
+    IAM_Creds -->|Temporary OAuth2 Token| Workspace
+    BE -->|Group Member Add / Revoke| Workspace
+    BE -->|Dispatch JSON Alerts| Webhook
 ```
 
 ---

@@ -672,6 +672,8 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
                         <button
                           type="button"
                           onClick={() => setShowSAEmail(!showSAEmail)}
+                          aria-label={showSAEmail ? "Hide service account email" : "Show service account email"}
+                          title={showSAEmail ? "Hide service account email" : "Show service account email"}
                           style={{
                             position: 'absolute',
                             right: '0.75rem',
@@ -1090,6 +1092,7 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
                                     className="clean-btn clean-btn-secondary"
                                     style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
                                     onClick={() => handleEditSpace(space)}
+                                    aria-label={`Edit space configuration for ${space.name}`}
                                   >
                                     <Edit size={12} /> Edit
                                   </button>
@@ -1098,6 +1101,7 @@ export default function SettingsView({ showToast, onConfigUpdated, onClose }: Se
                                     className="clean-btn clean-btn-danger"
                                     style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
                                     onClick={() => handleDeleteSpace(space.id)}
+                                    aria-label={`Delete space ${space.name}`}
                                   >
                                     <Trash2 size={12} /> Delete
                                   </button>
