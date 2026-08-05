@@ -354,7 +354,9 @@ export async function readDb(): Promise<DatabaseSchema> {
 }
 
 export async function writeDb(data: DatabaseSchema): Promise<void> {
-  await fs.writeFile(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  const tmpFile = `${DB_FILE}.tmp.${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  await fs.writeFile(tmpFile, JSON.stringify(data, null, 2), 'utf-8');
+  await fs.rename(tmpFile, DB_FILE);
 }
 
 export async function getSpaces(): Promise<SpaceConfig[]> {
