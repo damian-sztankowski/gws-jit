@@ -1,4 +1,6 @@
 import dns from 'dns/promises';
+import https from 'https';
+import http from 'http';
 import { getConfig, getSpaces } from './db.js';
 
 export interface NotificationPayload {
@@ -35,7 +37,7 @@ function isPrivateIp(ip: string): boolean {
   return false;
 }
 
-export async function validateWebhookUrl(urlStr: string): Promise<void> {
+export async function validateWebhookUrl(urlStr: string): Promise<string> {
   const url = new URL(urlStr);
   if (url.protocol !== 'https:') {
     throw new Error("Webhook URL must use secure HTTPS protocol.");
@@ -56,6 +58,8 @@ export async function validateWebhookUrl(urlStr: string): Promise<void> {
       throw new Error(`SSRF Guard: Outbound request to private/internal IP address '${ipAddress}' is blocked.`);
     }
   }
+  
+  return ipAddress;
 }
 
 export async function sendNotification(groupEmail: string, payload: NotificationPayload): Promise<void> {
@@ -96,7 +100,17 @@ export async function sendNotification(groupEmail: string, payload: Notification
     console.log(`[NOTIFICATION] Dispatching webhook to ${targetName} (${webhookUrl})...`);
     
     // Validate Webhook URL against SSRF and protocol rules
-    await validateWebhookUrl(webhookUrl);
+    const ipAddress = await validateWebhookUrl(webhookUrl);
+    
+    const agent = webhookUrl.startsWith('https') ? new https.Agent({
+      lookup: (hostname, options, callback) => {
+        callback(null, ipAddress, 4);
+      }
+    }) : new http.Agent({
+      lookup: (hostname, options, callback) => {
+        callback(null, ipAddress, 4);
+      }
+    });
 
     const isSlack = webhookUrl.toLowerCase().includes('slack.com');
     
@@ -119,8 +133,9 @@ export async function sendNotification(groupEmail: string, payload: Notification
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: textPayload })
-    });
+      body: JSON.stringify({ text: textPayload }),
+      agent
+    } as any);
     if (!response.ok) {
       console.error(`[NOTIFICATION] Webhook returned status ${response.status}: ${await response.text()}`);
     } else {
@@ -135,7 +150,17 @@ export async function dispatchTestWebhook(webhookUrl: string): Promise<void> {
   if (!webhookUrl) return;
 
   // Validate Webhook URL against SSRF and protocol rules
-  await validateWebhookUrl(webhookUrl);
+  const ipAddress = await validateWebhookUrl(webhookUrl);
+
+  const agent = webhookUrl.startsWith('https') ? new https.Agent({
+    lookup: (hostname, options, callback) => {
+      callback(null, ipAddress, 4);
+    }
+  }) : new http.Agent({
+    lookup: (hostname, options, callback) => {
+      callback(null, ipAddress, 4);
+    }
+  });
 
   const title = "Webhook Connection Test";
   const message = "Your GWS JIT Access Portal webhook integration is configured successfully! 🚀";
@@ -154,8 +179,9 @@ export async function dispatchTestWebhook(webhookUrl: string): Promise<void> {
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: textPayload })
-    });
+      body: JSON.stringify({ text: textPayload }),
+      agent
+    } as any);
     if (!response.ok) {
       throw new Error(`Webhook returned status ${response.status}: ${await response.text()}`);
     }
