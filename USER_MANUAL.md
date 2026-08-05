@@ -90,3 +90,11 @@ To maintain SOC2 Type II and ISO 27001 readiness, JIT policies undergo recurring
 ### ABAC Engine Construction
 *   **Eligible Attributes:** System-wide schema keys declared globally within *System Config* (e.g., `oncall`, `clearance_level`, `region`).
 *   **User Attribute Assignment:** Administrators map specific attribute values to user records. For a user to successfully request a JIT group, their assigned profile attributes must **completely satisfy** the criteria configured on the target group's JIT policy.
+
+---
+
+## 7. Health Probes & Operational Monitoring
+
+*   **Health Check Endpoint:** `GET /healthz` returns HTTP 200 `{"status": "ok", "timestamp": "..."}` for Cloud Run, Kubernetes, and container orchestration probes.
+*   **Graceful Shutdown:** The server traps `SIGTERM` and `SIGINT` signals to stop accepting new requests, gracefully shut down the background expiration scheduler, and allow in-flight requests to finalize cleanly.
+
