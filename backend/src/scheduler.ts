@@ -3,8 +3,15 @@ import { removeGroupMember } from './google.js';
 import { sendNotification } from './notifications.js';
 
 let intervalId: NodeJS.Timeout | null = null;
+let isProcessing = false;
 
 export async function checkExpiredRequests() {
+  if (isProcessing) {
+    console.log("[SCHEDULER] Skipping tick - previous check is still in progress.");
+    return;
+  }
+
+  isProcessing = true;
   try {
     const requests = await getRequests();
     const now = new Date();
@@ -60,6 +67,8 @@ export async function checkExpiredRequests() {
     }
   } catch (error) {
     console.error("[SCHEDULER] Error in checkExpiredRequests loop:", error);
+  } finally {
+    isProcessing = false;
   }
 }
 
