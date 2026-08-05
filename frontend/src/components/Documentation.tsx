@@ -230,7 +230,8 @@ export default function Documentation() {
         const midIdx = token.indexOf('](');
         const linkText = token.slice(1, midIdx);
         const url = token.slice(midIdx + 2, -1).trim();
-        const isMalicious = url.toLowerCase().startsWith('javascript:') || url.toLowerCase().startsWith('data:');
+        const lowerUrl = url.toLowerCase();
+        const isMalicious = lowerUrl.startsWith('javascript:') || lowerUrl.startsWith('data:') || lowerUrl.startsWith('vbscript:');
         const safeUrl = isMalicious ? '#' : url;
         return (
           <a key={i} href={safeUrl} target={safeUrl.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" style={{

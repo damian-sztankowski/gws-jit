@@ -9,3 +9,13 @@ db.json
 implementation_plan.md
 task.md
 walkthrough.md
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+.nyc_output/
