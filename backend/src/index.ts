@@ -418,6 +418,10 @@ app.post('/api/users', requireAuth, requireRole(['ADMIN']), async (req, res) => 
       return res.status(400).json({ error: "Email, Name, Role and Password are required." });
     }
 
+    if (password.length < 8) {
+      return res.status(400).json({ error: "Password policy error: Password must be at least 8 characters long." });
+    }
+
     const newUser: User = {
       email: email.trim().toLowerCase(),
       name: name.trim(),
@@ -445,6 +449,10 @@ app.put('/api/users/:email', requireAuth, requireRole(['ADMIN']), async (req, re
 
     if (!name || !role) {
       return res.status(400).json({ error: "Name and Role are required." });
+    }
+
+    if (password && password.trim() !== '' && password.length < 8) {
+      return res.status(400).json({ error: "Password policy error: Password must be at least 8 characters long." });
     }
 
     if (emailToUpdate === actor.toLowerCase() && role !== 'ADMIN') {
