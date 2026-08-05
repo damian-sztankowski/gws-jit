@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { 
   getConfig, 
@@ -26,7 +27,7 @@ import {
   deleteSpace
 } from './db.js';
 import { listGroups, addGroupMember, removeGroupMember, listGroupMembers } from './google.js';
-import { startScheduler } from './scheduler.js';
+import { startScheduler, stopScheduler } from './scheduler.js';
 import { JitRequest, User, UserRole, SpaceConfig, AuditLog } from './types.js';
 import { sendNotification, dispatchTestWebhook } from './notifications.js';
 
@@ -34,6 +35,9 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Trust proxy for correct client IP resolution behind Cloud Run / IAP / Load Balancer
+app.set('trust proxy', 1);
 
 const isProd = process.env.NODE_ENV === 'production' || process.env.AUTH_MODE === 'IAP';
 if (!isProd) {
@@ -45,7 +49,7 @@ if (!isProd) {
 } else {
   console.log("[CORS] Production/IAP mode: CORS disabled (served from same origin)");
 }
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 // Security Rate Limiters
 const authLimiter = rateLimit({
@@ -64,8 +68,23 @@ const apiLimiter = rateLimit({
   message: { error: 'Too many requests, please try again later.' }
 });
 
-// Memory map for user sessions (token -> email)
-const SESSIONS = new Map<string, string>();
+// Session store with TTL support (token -> { email, expiresAt })
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+interface SessionEntry {
+  email: string;
+  expiresAt: number;
+}
+const SESSIONS = new Map<string, SessionEntry>();
+
+// Periodic cleanup of expired sessions (every 15 minutes)
+const sessionCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of SESSIONS) {
+    if (session.expiresAt <= now) {
+      SESSIONS.delete(token);
+    }
+  }
+}, 15 * 60 * 1000);
 
 // Extended Express Request to support user context
 interface AuthenticatedRequest extends express.Request {
@@ -119,11 +138,12 @@ const requireAuth = async (req: express.Request, res: express.Response, next: ex
     return res.status(401).json({ error: "Unauthorized. Missing session token." });
   }
   const token = authHeader.substring(7);
-  const email = SESSIONS.get(token);
-  if (!email) {
+  const session = SESSIONS.get(token);
+  if (!session || session.expiresAt <= Date.now()) {
+    if (session) SESSIONS.delete(token); // Clean up expired token
     return res.status(401).json({ error: "Unauthorized. Session has expired or is invalid." });
   }
-  const user = await getUserByEmail(email);
+  const user = await getUserByEmail(session.email);
   if (!user) {
     return res.status(401).json({ error: "User profile no longer exists." });
   }
@@ -174,9 +194,9 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     }
     
     console.log(`[AUTH] Successful login for: ${email}`);
-    // Generate simple secure token
-    const token = 'token_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
-    SESSIONS.set(token, user.email);
+    // Generate cryptographically secure session token
+    const token = crypto.randomBytes(32).toString('hex');
+    SESSIONS.set(token, { email: user.email, expiresAt: Date.now() + SESSION_TTL_MS });
     
     // Return token and user info (excluding password)
     const { password: _, ...safeUser } = user;
@@ -194,6 +214,21 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     user: safeUser,
     authMode: process.env.AUTH_MODE || 'LOCAL'
   });
+});
+
+// Logout endpoint
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    SESSIONS.delete(token);
+  }
+  res.json({ success: true });
+});
+
+// Health check endpoint for Cloud Run / Kubernetes / Docker HEALTHCHECK
+app.get('/healthz', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // 2. Config Endpoints
@@ -1044,7 +1079,7 @@ app.get('*', (req, res, next) => {
   });
 });
 
-app.listen(Number(PORT), '0.0.0.0', async () => {
+const server = app.listen(Number(PORT), '0.0.0.0', async () => {
   console.log(`[API] Group JIT Server running on http://0.0.0.0:${PORT}`);
   // Tick every 10 seconds to detect expirations rapidly in dev/demo
   startScheduler(10000); 
@@ -1070,3 +1105,28 @@ app.listen(Number(PORT), '0.0.0.0', async () => {
     }
   }
 });
+
+// Graceful shutdown handler for SIGTERM (Cloud Run) and SIGINT (Ctrl+C)
+function gracefulShutdown(signal: string) {
+  console.log(`\n[SHUTDOWN] Received ${signal}. Starting graceful shutdown...`);
+  
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('[SHUTDOWN] HTTP server closed.');
+  });
+  
+  // Stop the background scheduler
+  stopScheduler();
+  
+  // Clear session cleanup interval
+  clearInterval(sessionCleanupInterval);
+  
+  // Allow in-flight requests to complete (Cloud Run gives 10s grace period)
+  setTimeout(() => {
+    console.log('[SHUTDOWN] Shutdown complete.');
+    process.exit(0);
+  }, 5000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

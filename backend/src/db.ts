@@ -29,7 +29,7 @@ export function verifyPassword(password: string, storedHash: string): boolean {
     return hash === verifyHash;
   }
   
-  return password === storedHash; // Fallback for legacy plain-text passwords
+  return false;
 }
 
 const isFirestore = process.env.DATABASE_ENGINE === 'FIRESTORE';
