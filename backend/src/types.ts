@@ -1,14 +1,26 @@
+export interface JitApprovalEntry {
+  approverEmail: string;
+  approvedAt: string;
+  note?: string;
+}
+
 export interface JitRequest {
   id: string;
   requesterEmail: string;
   groupEmail: string;
   groupName: string;
   justification: string;
+  ticketId?: string;
+  isBreakGlass?: boolean;
   durationMinutes: number;
   requestedAt: string;
   status: 'PENDING' | 'APPROVED' | 'DENIED' | 'ACTIVE' | 'EXPIRED' | 'REVOKED';
   approverEmail?: string;
   approvedAt?: string;
+  reviewNote?: string;
+  approvals?: JitApprovalEntry[];
+  requiredApprovals?: number;
+  extendedCount?: number;
   activatedAt?: string;
   expiresAt?: string;
   revokedAt?: string;
@@ -36,9 +48,12 @@ export interface GroupJitPolicy {
   groupEmail: string;
   requiredAttributes: string[]; // Dynamic ABAC attribute tags required
   autoApproval?: boolean;
-  lastCertifiedAt?: string;   // ISO timestamp
-  lastCertifiedBy?: string;   // Admin email who certified it
-  attestationDueAt?: string;  // Calculated due date
+  maxDurationMinutes?: number;  // Optional per-group max TTL (default 240)
+  requiredApprovals?: number;   // Peer approval quorum (1 or 2, default 1)
+  allowBreakGlass?: boolean;    // Allow emergency break-glass 30m elevation
+  lastCertifiedAt?: string;     // ISO timestamp
+  lastCertifiedBy?: string;     // Admin email who certified it
+  attestationDueAt?: string;    // Calculated due date
 }
 
 export interface SpaceConfig {
@@ -48,6 +63,7 @@ export interface SpaceConfig {
   adminEmail: string;
   serviceAccountEmail?: string; // Optional keyless SA email
   serviceAccountJson?: string; // Optional (falls back to global)
+  hasServiceAccount?: boolean; // Redacted boolean indicator for API responses
   autoApproval: boolean;
   groupPolicies?: GroupJitPolicy[];
   webhookUrl?: string;

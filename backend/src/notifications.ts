@@ -13,16 +13,30 @@ export interface NotificationPayload {
     durationMinutes: number;
     justification: string;
     status: string;
+    ticketId?: string;
+    isBreakGlass?: boolean;
+    reviewNote?: string;
   };
 }
 
-function isPrivateIp(ip: string): boolean {
-  if (ip === '127.0.0.1' || ip === '::1' || ip.startsWith('127.')) {
+function isPrivateIp(rawIp: string): boolean {
+  const ip = rawIp.trim().toLowerCase();
+  const v4MappedPrefix = '::ffff:';
+  const normalizedIp = ip.startsWith(v4MappedPrefix) ? ip.slice(v4MappedPrefix.length) : ip;
+
+  if (
+    normalizedIp === '127.0.0.1' ||
+    normalizedIp === '0.0.0.0' ||
+    normalizedIp === '::1' ||
+    normalizedIp === '::' ||
+    normalizedIp.startsWith('127.') ||
+    normalizedIp.startsWith('0.')
+  ) {
     return true;
   }
-  if (ip.startsWith('10.')) return true;
-  if (ip.startsWith('172.')) {
-    const parts = ip.split('.');
+  if (normalizedIp.startsWith('10.')) return true;
+  if (normalizedIp.startsWith('172.')) {
+    const parts = normalizedIp.split('.');
     if (parts.length >= 2) {
       const secondPart = parseInt(parts[1], 10);
       if (secondPart >= 16 && secondPart <= 31) {
@@ -30,36 +44,111 @@ function isPrivateIp(ip: string): boolean {
       }
     }
   }
-  if (ip.startsWith('192.168.')) return true;
-  if (ip.startsWith('169.254.')) return true;
-  if (ip.toLowerCase().startsWith('fe80:')) return true;
-  if (ip.toLowerCase().startsWith('fc00:') || ip.toLowerCase().startsWith('fd00:')) return true;
+  if (normalizedIp.startsWith('100.')) {
+    const parts = normalizedIp.split('.');
+    if (parts.length >= 2) {
+      const secondPart = parseInt(parts[1], 10);
+      if (secondPart >= 64 && secondPart <= 127) {
+        return true; // RFC 6598 Shared CGNAT space
+      }
+    }
+  }
+  if (normalizedIp.startsWith('192.168.')) return true;
+  if (normalizedIp.startsWith('169.254.')) return true;
+  // Multicast / reserved IPv4 (224.0.0.0/4 and 240.0.0.0/4)
+  const firstOctet = parseInt(normalizedIp.split('.')[0], 10);
+  if (Number.isFinite(firstOctet) && firstOctet >= 224) return true;
+
+  if (normalizedIp.startsWith('fe80:')) return true;
+  if (normalizedIp.startsWith('fc00:') || normalizedIp.startsWith('fd00:')) return true;
   return false;
 }
 
-export async function validateWebhookUrl(urlStr: string): Promise<string> {
+export async function validateWebhookUrl(urlStr: string): Promise<{ ipAddress: string; family: 4 | 6 }> {
   const url = new URL(urlStr);
   if (url.protocol !== 'https:') {
     throw new Error("Webhook URL must use secure HTTPS protocol.");
   }
-  
-  const hostname = url.hostname;
-  let ipAddress: string;
+
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === 'metadata.google.internal' || hostname === 'localhost' || hostname.endsWith('.internal')) {
+    throw new Error(`SSRF Guard: Outbound request to internal host '${hostname}' is blocked.`);
+  }
+
+  let records: { address: string; family: number }[];
   try {
-    const lookup = await dns.lookup(hostname);
-    ipAddress = lookup.address;
+    records = await dns.lookup(hostname, { all: true });
   } catch (err) {
     throw new Error(`Failed to resolve hostname '${hostname}': ${(err as Error).message}`);
   }
-  
-  const isProd = process.env.NODE_ENV === 'production' || process.env.AUTH_MODE === 'IAP';
-  if (isProd) {
-    if (isPrivateIp(ipAddress)) {
-      throw new Error(`SSRF Guard: Outbound request to private/internal IP address '${ipAddress}' is blocked.`);
+
+  if (!records || records.length === 0) {
+    throw new Error(`No DNS records resolved for '${hostname}'.`);
+  }
+
+  for (const record of records) {
+    if (isPrivateIp(record.address)) {
+      throw new Error(`SSRF Guard: Outbound request to private/internal IP address '${record.address}' is blocked.`);
     }
   }
-  
-  return ipAddress;
+
+  const primary = records.find(r => r.family === 4) || records[0];
+  return {
+    ipAddress: primary.address,
+    family: primary.family === 6 ? 6 : 4
+  };
+}
+
+async function postPinnedHttpsJson(webhookUrl: string, payloadObj: unknown): Promise<void> {
+  const { ipAddress, family } = await validateWebhookUrl(webhookUrl);
+  const parsedUrl = new URL(webhookUrl);
+  const bodyData = Buffer.from(JSON.stringify(payloadObj), 'utf-8');
+
+  const agent = new https.Agent({
+    lookup: (_hostname, _options, callback) => {
+      callback(null, ipAddress, family);
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const req = https.request(
+      {
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || 443,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: 'POST',
+        agent,
+        timeout: 10000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': bodyData.length
+        }
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on('end', () => {
+          const responseText = Buffer.concat(chunks).toString('utf-8');
+          const status = res.statusCode || 0;
+          if (status >= 300 && status < 400) {
+            return reject(new Error(`SSRF Guard: Webhook HTTP redirect (${status}) is not permitted.`));
+          }
+          if (status < 200 || status >= 300) {
+            return reject(new Error(`Webhook returned status ${status}: ${responseText}`));
+          }
+          resolve();
+        });
+      }
+    );
+
+    req.on('timeout', () => {
+      req.destroy(new Error('Webhook request timed out after 10s.'));
+    });
+    req.on('error', (err) => reject(err));
+    req.write(bodyData);
+    req.end();
+  });
 }
 
 export async function sendNotification(groupEmail: string, payload: NotificationPayload): Promise<void> {
@@ -92,26 +181,15 @@ export async function sendNotification(groupEmail: string, payload: Notification
       `* **Requester:** \`${payload.requestDetails.requesterEmail}\`\n` +
       `* **Group:** \`${payload.requestDetails.groupEmail}\`\n` +
       `* **Duration:** \`${payload.requestDetails.durationMinutes} minutes\`\n` +
+      (payload.requestDetails.ticketId ? `* **Incident / Ticket ID:** \`${payload.requestDetails.ticketId}\`\n` : '') +
+      (payload.requestDetails.isBreakGlass ? `* **Mode:** 🚨 \`EMERGENCY BREAK-GLASS\`\n` : '') +
       `* **Justification:** _"${payload.requestDetails.justification}"_\n` +
+      (payload.requestDetails.reviewNote ? `* **Reviewer Note:** _"${payload.requestDetails.reviewNote}"_\n` : '') +
       `* **Status:** \`${payload.requestDetails.status}\``
       : '');
 
   try {
-    console.log(`[NOTIFICATION] Dispatching webhook to ${targetName} (${webhookUrl})...`);
-    
-    // Validate Webhook URL against SSRF and protocol rules
-    const ipAddress = await validateWebhookUrl(webhookUrl);
-    
-    const agent = webhookUrl.startsWith('https') ? new https.Agent({
-      lookup: (hostname, options, callback) => {
-        callback(null, ipAddress, 4);
-      }
-    }) : new http.Agent({
-      lookup: (hostname, options, callback) => {
-        callback(null, ipAddress, 4);
-      }
-    });
-
+    console.log(`[NOTIFICATION] Dispatching webhook to ${targetName}...`);
     const isSlack = webhookUrl.toLowerCase().includes('slack.com');
     
     let textPayload = '';
@@ -123,24 +201,18 @@ export async function sendNotification(groupEmail: string, payload: Notification
           `• *Requester:* \`${payload.requestDetails.requesterEmail}\`\n` +
           `• *Group:* \`${payload.requestDetails.groupEmail}\`\n` +
           `• *Duration:* \`${payload.requestDetails.durationMinutes} minutes\`\n` +
+          (payload.requestDetails.ticketId ? `• *Incident / Ticket ID:* \`${payload.requestDetails.ticketId}\`\n` : '') +
+          (payload.requestDetails.isBreakGlass ? `• *Mode:* 🚨 \`EMERGENCY BREAK-GLASS\`\n` : '') +
           `• *Justification:* _"${payload.requestDetails.justification}"_\n` +
+          (payload.requestDetails.reviewNote ? `• *Reviewer Note:* _"${payload.requestDetails.reviewNote}"_\n` : '') +
           `• *Status:* \`${payload.requestDetails.status}\``
           : '');
     } else {
       textPayload = markdownText;
     }
 
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: textPayload }),
-      agent
-    } as any);
-    if (!response.ok) {
-      console.error(`[NOTIFICATION] Webhook returned status ${response.status}: ${await response.text()}`);
-    } else {
-      console.log(`[NOTIFICATION] Webhook dispatched successfully.`);
-    }
+    await postPinnedHttpsJson(webhookUrl, { text: textPayload });
+    console.log(`[NOTIFICATION] Webhook dispatched successfully.`);
   } catch (err) {
     console.error(`[NOTIFICATION] Failed to send webhook:`, err);
   }
@@ -149,24 +221,11 @@ export async function sendNotification(groupEmail: string, payload: Notification
 export async function dispatchTestWebhook(webhookUrl: string): Promise<void> {
   if (!webhookUrl) return;
 
-  // Validate Webhook URL against SSRF and protocol rules
-  const ipAddress = await validateWebhookUrl(webhookUrl);
-
-  const agent = webhookUrl.startsWith('https') ? new https.Agent({
-    lookup: (hostname, options, callback) => {
-      callback(null, ipAddress, 4);
-    }
-  }) : new http.Agent({
-    lookup: (hostname, options, callback) => {
-      callback(null, ipAddress, 4);
-    }
-  });
-
   const title = "Webhook Connection Test";
   const message = "Your GWS JIT Access Portal webhook integration is configured successfully! 🚀";
 
   try {
-    console.log(`[NOTIFICATION] Dispatching test webhook to ${webhookUrl}...`);
+    console.log(`[NOTIFICATION] Dispatching test webhook...`);
     const isSlack = webhookUrl.toLowerCase().includes('slack.com');
     
     let textPayload = '';
@@ -176,15 +235,7 @@ export async function dispatchTestWebhook(webhookUrl: string): Promise<void> {
       textPayload = `### ${title}\n\n${message}`;
     }
 
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: textPayload }),
-      agent
-    } as any);
-    if (!response.ok) {
-      throw new Error(`Webhook returned status ${response.status}: ${await response.text()}`);
-    }
+    await postPinnedHttpsJson(webhookUrl, { text: textPayload });
     console.log(`[NOTIFICATION] Test webhook dispatched successfully.`);
   } catch (err) {
     console.error(`[NOTIFICATION] Failed to dispatch test webhook:`, err);

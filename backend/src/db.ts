@@ -11,6 +11,19 @@ export function hashPassword(password: string): string {
   return `v2:${iterations}:${salt}:${hash}`;
 }
 
+function safeCompareHex(aHex: string, bHex: string): boolean {
+  try {
+    const bufA = Buffer.from(aHex, 'hex');
+    const bufB = Buffer.from(bHex, 'hex');
+    if (bufA.length === 0 || bufA.length !== bufB.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
 export function verifyPassword(password: string, storedHash: string): boolean {
   if (!storedHash) return false;
   const parts = storedHash.split(':');
@@ -19,14 +32,15 @@ export function verifyPassword(password: string, storedHash: string): boolean {
     if (parts.length !== 4) return false;
     const [, iterationsStr, salt, hash] = parts;
     const iterations = parseInt(iterationsStr, 10);
+    if (!Number.isFinite(iterations) || iterations <= 0) return false;
     const verifyHash = crypto.pbkdf2Sync(password, salt, iterations, 64, 'sha512').toString('hex');
-    return hash === verifyHash;
+    return safeCompareHex(hash, verifyHash);
   }
   
   if (parts.length === 2) {
     const [salt, hash] = parts;
     const verifyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-    return hash === verifyHash;
+    return safeCompareHex(hash, verifyHash);
   }
   
   return false;
@@ -85,6 +99,9 @@ const DEFAULT_DB: DatabaseSchema = {
       {
         groupEmail: "gws-super-admins@company.com",
         requiredAttributes: ["security"],
+        maxDurationMinutes: 60,
+        requiredApprovals: 2,
+        allowBreakGlass: true,
         lastCertifiedAt: new Date().toISOString(),
         lastCertifiedBy: "system",
         attestationDueAt: new Date(Date.now() + 90 * 24 * 3600000).toISOString()
@@ -92,6 +109,8 @@ const DEFAULT_DB: DatabaseSchema = {
       {
         groupEmail: "gws-user-admins@company.com",
         requiredAttributes: ["oncall"],
+        maxDurationMinutes: 120,
+        requiredApprovals: 1,
         lastCertifiedAt: new Date().toISOString(),
         lastCertifiedBy: "system",
         attestationDueAt: new Date(Date.now() + 90 * 24 * 3600000).toISOString()
@@ -99,6 +118,8 @@ const DEFAULT_DB: DatabaseSchema = {
       {
         groupEmail: "gws-billing-leads@company.com",
         requiredAttributes: ["readonly"],
+        maxDurationMinutes: 120,
+        requiredApprovals: 1,
         lastCertifiedAt: new Date().toISOString(),
         lastCertifiedBy: "system",
         attestationDueAt: new Date(Date.now() + 90 * 24 * 3600000).toISOString()
@@ -106,6 +127,9 @@ const DEFAULT_DB: DatabaseSchema = {
       {
         groupEmail: "gws-security-ops@company.com",
         requiredAttributes: ["cdt", "security"],
+        maxDurationMinutes: 120,
+        requiredApprovals: 1,
+        allowBreakGlass: true,
         lastCertifiedAt: new Date().toISOString(),
         lastCertifiedBy: "system",
         attestationDueAt: new Date(Date.now() + 90 * 24 * 3600000).toISOString()
@@ -140,7 +164,7 @@ const DEFAULT_DB: DatabaseSchema = {
       email: "superadmin@company.com",
       name: "Super Admin",
       role: "ADMIN",
-      password: "password",
+      password: hashPassword("password"),
       attributes: ["oncall", "cdt", "security", "readonly"],
       assignedSpaces: ["global"]
     }
@@ -173,7 +197,9 @@ export async function initDb(): Promise<DatabaseSchema> {
           for (const user of DEFAULT_DB.users) {
             const seededUser = {
               ...user,
-              password: hashPassword(user.password || '')
+              password: user.password && user.password.startsWith('v2:')
+                ? user.password
+                : hashPassword(user.password || '')
             };
             await firestore.collection('users').doc(user.email.toLowerCase()).set(seededUser);
           }
@@ -306,19 +332,24 @@ export async function initDb(): Promise<DatabaseSchema> {
         }));
         modified = true;
       } else {
-        // 4. Migrate existing users attributes
+        // 4. Migrate existing users attributes & upgrade any legacy plaintext passwords
         parsed.users = parsed.users.map((u: any) => {
-          if (!u.attributes) {
+          let nextUser = u;
+          if (!nextUser.attributes) {
             const attributes: string[] = [];
-            if (u.oncall) attributes.push("oncall");
-            if (u.cdt) attributes.push("cdt");
-            if (u.security) attributes.push("security");
-            if (u.readonly) attributes.push("readonly");
+            if (nextUser.oncall) attributes.push("oncall");
+            if (nextUser.cdt) attributes.push("cdt");
+            if (nextUser.security) attributes.push("security");
+            if (nextUser.readonly) attributes.push("readonly");
             modified = true;
-            const { oncall, cdt, security, readonly, ...rest } = u;
-            return { ...rest, attributes };
+            const { oncall, cdt, security, readonly, ...rest } = nextUser;
+            nextUser = { ...rest, attributes };
           }
-          return u;
+          if (nextUser.password && !String(nextUser.password).includes(':')) {
+            nextUser = { ...nextUser, password: hashPassword(String(nextUser.password)) };
+            modified = true;
+          }
+          return nextUser;
         });
 
         // Ensure at least one admin user exists
@@ -349,14 +380,24 @@ export async function initDb(): Promise<DatabaseSchema> {
   return initPromise;
 }
 
+let dbWriteChain: Promise<void> = Promise.resolve();
+
+function withDbLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = dbWriteChain.then(fn, fn);
+  dbWriteChain = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 export async function readDb(): Promise<DatabaseSchema> {
   return initDb();
 }
 
 export async function writeDb(data: DatabaseSchema): Promise<void> {
-  const tmpFile = `${DB_FILE}.tmp.${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  await fs.writeFile(tmpFile, JSON.stringify(data, null, 2), 'utf-8');
-  await fs.rename(tmpFile, DB_FILE);
+  return withDbLock(async () => {
+    const tmpFile = `${DB_FILE}.tmp.${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    await fs.writeFile(tmpFile, JSON.stringify(data, null, 2), 'utf-8');
+    await fs.rename(tmpFile, DB_FILE);
+  });
 }
 
 export async function getSpaces(): Promise<SpaceConfig[]> {
@@ -411,6 +452,41 @@ export async function getRequests(): Promise<JitRequest[]> {
   return db.requests;
 }
 
+export async function getActiveRequests(): Promise<JitRequest[]> {
+  if (isFirestore && firestore) {
+    await initDb();
+    const snapshot = await firestore.collection('requests').where('status', '==', 'ACTIVE').get();
+    return snapshot.docs.map(doc => doc.data() as JitRequest);
+  }
+  const db = await readDb();
+  return db.requests.filter(r => r.status === 'ACTIVE');
+}
+
+export async function claimExpiredRequest(id: string, revokedAt: string): Promise<boolean> {
+  if (isFirestore && firestore) {
+    await initDb();
+    const docRef = firestore.collection('requests').doc(id);
+    return firestore.runTransaction(async (tx) => {
+      const snap = await tx.get(docRef);
+      if (!snap.exists) return false;
+      const current = snap.data() as JitRequest;
+      if (current.status !== 'ACTIVE') return false;
+      if (!current.expiresAt || new Date(current.expiresAt) > new Date()) return false;
+      tx.update(docRef, { status: 'EXPIRED', revokedAt });
+      return true;
+    });
+  }
+  const db = await readDb();
+  const idx = db.requests.findIndex(r => r.id === id);
+  if (idx === -1) return false;
+  const current = db.requests[idx];
+  if (current.status !== 'ACTIVE') return false;
+  if (!current.expiresAt || new Date(current.expiresAt) > new Date()) return false;
+  db.requests[idx] = { ...current, status: 'EXPIRED', revokedAt };
+  await writeDb(db);
+  return true;
+}
+
 export async function saveRequest(request: JitRequest): Promise<void> {
   if (isFirestore && firestore) {
     await initDb();
@@ -431,6 +507,111 @@ export async function updateRequest(updated: JitRequest): Promise<void> {
   const db = await readDb();
   db.requests = db.requests.map(r => r.id === updated.id ? updated : r);
   await writeDb(db);
+}
+
+export interface SessionRecord {
+  email: string;
+  expiresAt: number;
+}
+
+const LOCAL_SESSIONS = new Map<string, SessionRecord>();
+
+function hashSessionToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+export async function saveSession(token: string, email: string, expiresAt: number): Promise<void> {
+  const tokenHash = hashSessionToken(token);
+  const record: SessionRecord = { email: email.toLowerCase().trim(), expiresAt };
+  LOCAL_SESSIONS.set(tokenHash, record);
+  if (isFirestore && firestore) {
+    await initDb();
+    await firestore.collection('sessions').doc(tokenHash).set(record);
+  }
+}
+
+export async function getSession(token: string): Promise<SessionRecord | undefined> {
+  const tokenHash = hashSessionToken(token);
+  const cached = LOCAL_SESSIONS.get(tokenHash);
+  if (cached) {
+    if (cached.expiresAt <= Date.now()) {
+      LOCAL_SESSIONS.delete(tokenHash);
+      if (isFirestore && firestore) {
+        await firestore.collection('sessions').doc(tokenHash).delete().catch(() => {});
+      }
+      return undefined;
+    }
+    return cached;
+  }
+  if (isFirestore && firestore) {
+    await initDb();
+    const doc = await firestore.collection('sessions').doc(tokenHash).get();
+    if (!doc.exists) return undefined;
+    const data = doc.data() as SessionRecord;
+    if (data.expiresAt <= Date.now()) {
+      await firestore.collection('sessions').doc(tokenHash).delete().catch(() => {});
+      return undefined;
+    }
+    LOCAL_SESSIONS.set(tokenHash, data);
+    return data;
+  }
+  return undefined;
+}
+
+export async function deleteSession(token: string): Promise<void> {
+  const tokenHash = hashSessionToken(token);
+  LOCAL_SESSIONS.delete(tokenHash);
+  if (isFirestore && firestore) {
+    await initDb();
+    await firestore.collection('sessions').doc(tokenHash).delete().catch(() => {});
+  }
+}
+
+export async function deleteSessionsByEmail(email: string): Promise<void> {
+  const normalized = email.toLowerCase().trim();
+  for (const [hash, session] of LOCAL_SESSIONS) {
+    if (session.email.toLowerCase() === normalized) {
+      LOCAL_SESSIONS.delete(hash);
+    }
+  }
+  if (isFirestore && firestore) {
+    try {
+      await initDb();
+      const snap = await firestore
+        .collection('sessions')
+        .where('email', '==', normalized)
+        .get();
+      if (!snap.empty) {
+        const batch = firestore.batch();
+        snap.docs.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+      }
+    } catch (err) {
+      console.error('[DB] Failed to revoke Firestore sessions for user:', err);
+    }
+  }
+}
+
+export async function cleanupExpiredSessions(): Promise<void> {
+  const now = Date.now();
+  for (const [hash, session] of LOCAL_SESSIONS) {
+    if (session.expiresAt <= now) {
+      LOCAL_SESSIONS.delete(hash);
+    }
+  }
+  if (isFirestore && firestore) {
+    try {
+      await initDb();
+      const snap = await firestore.collection('sessions').where('expiresAt', '<=', now).limit(100).get();
+      if (!snap.empty) {
+        const batch = firestore.batch();
+        snap.docs.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+      }
+    } catch (err) {
+      console.error('[DB] Failed to clean up expired Firestore sessions:', err);
+    }
+  }
 }
 
 export async function getConfig(): Promise<AppConfig> {

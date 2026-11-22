@@ -10,7 +10,6 @@ backend/db.json
 backend/.env
 *.log
 .gemini
-Dockerfile
 .dockerignore
 walkthrough.md
 implementation_plan.md

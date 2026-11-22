@@ -1,100 +1,114 @@
-# GWS JIT Access Portal: User Manual & Configuration Reference
+# Operator Manual & Governance Reference
 
-This reference manual provides a granular breakdown of the configurations, architecture options, user roles, and access controls within the Google Workspace (GWS) Just-In-Time (JIT) Access Portal.
-
----
-
-## 1. Access Command Center & JIT Requests
-
-The **Command Center** serves as the primary end-user dashboard for requesting time-bound group elevations and monitoring request states.
-
-*   **Active Space Selection:** Sets the tenant context (e.g., Global vs. Specific Child Tenant). Filtering by Space dynamically restricts visible JIT groups and logs.
-*   **Select JIT Group:** The target Google Group for temporary membership. Only groups tied to an active JIT policy within the selected Space are visible.
-*   **Duration:** The TTL (Time-To-Live) for group membership. Upon expiration, a background worker automatically revokes directory access.
-*   **Justification:** A mandatory text entry specifying the business or technical reason for elevation. This is permanently written to the immutable audit trail.
+This manual documents operational workflows, policy governance, custody quorums, emergency break-glass procedures, and API endpoints for the **GWS JIT Privileged Access Console**.
 
 ---
 
-## 2. Portal Settings — System Configuration
+## Access Control & Elevation Requests
 
-> ⚠️ **Access Control:** This section is restricted exclusively to identities holding the `ADMIN` role.
+The **Operations / Access Control** workspace is the primary console for requesting time-bounded Google Workspace group memberships and reviewing peer elevation queues.
 
-### Core Settings
-*   **Engine Mode:**
-    *   `MOCK`: Simulates Google Directory API operations in-memory. Recommended for local sandboxing and testing policy logic.
-    *   `LIVE`: Executes real-time `Directory.Members.insert()` and `delete()` operations against the live production Google Workspace directory.
-*   **Workspace Domain:** The primary managed G Suite/Google Workspace domain (e.g., `company.com`).
-*   **Delegated Operator Email:** A standard Google Workspace account (non-Super-Admin recommended) granted explicit group management privileges. The underlying GCP Service Account impersonates this user via **Domain-Wide Delegation (DWD)**.
-*   **Access Review Attestation Interval (Days):** The sliding compliance window (Default: `90` days) before a group configuration triggers a mandatory administrative re-certification.
+* **Directory Scope Switcher:** Selects the active Workspace tenant boundary (`Global` or an isolated multi-tenant `Space`). Only groups, active grants, and history belonging to the selected scope are displayed.
+* **Target Workspace Group:** Interactive group selection filtered dynamically by the signed-in operator's ABAC attribute tags. Each card surfaces policy posture (`AUTO`, `2-PEER`, and privilege description).
+* **Lease TTL:** Bounded elevation window (`30m`, `1h`, `2h`, `4h`), constrained by the target policy's `maxDurationMinutes` ceiling.
+* **Ticket / Change ID:** Structured incident or change reference (for example `INC-4821` or `CHG-902`) persisted across the custody queue, webhook alerts, and immutable audit ledger.
+* **Operational Justification:** Mandatory statement of administrative intent recorded permanently in the audit ledger.
 
-### Integration & Alerts
-*   **Global Webhook Notification URL:** The fallback webhook destination (Slack, Microsoft Teams, or Google Chat). The portal dispatches structured JSON payloads capturing lifecycle state transitions: `PENDING` $\rightarrow$ `APPROVED` / `DENIED` $\rightarrow$ `REVOKED` / `EXPIRED`.
-*   **Test Webhook Button:** Fires a synthetic payload to validate endpoint end-to-end network connectivity and schema parsing.
+### Live Lease Extensions & Early Revocation
 
-### Identity & Credentials Architecture
-*   **Workload Identity Federation (Keyless - Recommended):** Bypasses static JSON key hazards. The JIT Portal exchanges its ambient runtime GCP identity (e.g., GKE or Compute Engine) for short-lived delegation tokens.
-    *   *Requirement:* **Workspace Delegation Service Account Email**
-*   **Service Account JSON / WIF Config:** Legacy cryptographic authentication. Requires pasting the raw, unencrypted contents of a GCP Service Account private key file.
+* **+30m Lease Extension:** Operators (or `ADMIN` principals) may extend an active standard lease by `30` minutes up to `2` times, provided total duration remains within the group policy's `maxDurationMinutes` cap.
+* **Immediate Revocation:** Principals may terminate their own active lease early (`Revoke`) once maintenance is complete, immediately invoking `Directory.Members.delete()`.
 
 ---
 
-## 3. Portal Settings — Global Policies
+## Dual-Custody Peer Quorum & Break-Glass
 
-Global Policies define the baseline Attribute-Based Access Control (ABAC) rules for the root Workspace domain.
+### Single & Two-Peer Custody Quorums
 
-*   **Group JIT Policy List:** An inventory of Google Groups synced automatically via the Directory API or registered through manual overrides.
-*   **⚡ Pre-Approved Option:** Bypasses manual `APPROVER` intervention. When enabled, requests to join this group are automatically validated against ABAC tags and instantly provisioned.
-*   **Required Attribute Tags:** Key-value markers a requester's profile must feature to qualify for elevation (e.g., `team: devops`).
-*   **Manual Add Group:** Allows admins to force-register arbitrary target group emails, bypassing the broader Directory API sync loop.
+> [!IMPORTANT]
+> Self-approval is cryptographically and logically blocked across all endpoints. A principal can never authorize or deny their own elevation request.
+
+* **1-Peer Review (Default):** Requires authorization from one independent `APPROVER` or `ADMIN` assigned to the target Space.
+* **2-Peer Tier-0 Quorum:** High-impact groups (such as `gws-super-admins`) can enforce `requiredApprovals: 2`. The first reviewer transitions the request to `QUORUM 1/2` while keeping directory access unprovisioned; the second distinct reviewer triggers `Directory.Members.insert()` and starts the lease timer.
+* **Audit Review Notes:** Reviewers can attach structured verification comments or rejection reasons during approval or denial.
+
+### P0 Emergency Break-Glass
+
+> [!CAUTION]
+> Break-glass bypasses peer custody waiting queues and immediately dispatches a high-severity alert to configured Slack, Google Chat, or Microsoft Teams security channels.
+
+For groups with `allowBreakGlass: true`, principals holding the `oncall` ABAC tag (or `ADMIN` role) can invoke **Emergency break-glass**:
+
+1. **Mandatory Incident ID:** Requires a valid incident ticket (`INC-...`).
+2. **Strict 30-Minute Cap:** Lease duration is locked to `30` minutes and cannot be extended.
+3. **Immutable Telemetry:** Logged under event type `BREAK_GLASS_JIT` for post-incident security review.
 
 ---
 
-## 4. Portal Settings — Spaces (Multi-Tenancy)
+## Policies, Credentials & Multi-Tenant Spaces
 
-Spaces offer structural isolation tailored for Managed Service Providers (MSPs) and large enterprises requiring distinct boundary lines for child domains, specific policies, and logging pipelines.
+> [!WARNING]
+> Access to **Governance / Policies & Spaces** and **Governance / Identities** is restricted strictly to `ADMIN` principals.
 
-| Configuration Field | Technical Purpose |
+### Directory Engine & Keyless Workload Identity
+
+| Setting | Technical Behavior |
 | :--- | :--- |
-| **Space Name** | Logical unique identifier for the specific tenant environment. |
-| **Space Domain** | The specific isolated Workspace domain bound to this Space. |
-| **Delegated Operator Email** | Tenant-specific administrator account used for DWD impersonation. |
-| **Space Webhook URL** | Dedicated notification routing for tenant-isolated Slack/Teams channels. |
-| **Credentials JSON Override** | Optional isolated GCP Service Account key text field. If unconfigured, the Space defaults to the global system credentials. |
+| **MOCK Engine** | Simulates Google Workspace Directory SDK calls in memory for local evaluation and policy testing. |
+| **LIVE Engine** | Executes authenticated `admin.directory.v1` group and membership mutations against Google Workspace. |
+| **Workload Identity (Keyless)** | Uses GCP `iamcredentials.googleapis.com` (`signJwt`) to mint short-lived OAuth2 tokens (cached 55m) with zero stored private keys. |
+| **Delegated Operator Email** | Dedicated Workspace account assigned a custom least-privilege Admin Role (`Groups > Read`, `Groups > Update`, `Users > Read`). |
 
----
+### Group Policy Parameters
 
-## 5. Access Reviews & Compliance Attestation
-
-To maintain SOC2 Type II and ISO 27001 readiness, JIT policies undergo recurring verification to prevent access drift.
-
-*   **JIT Policy Listing:** A central registry displaying active policies, historical attestation timestamps, and the identity of the certifying administrator.
-*   **Certify Button:** Triggers an automated multi-step compliance reconciliation audit:
-    1. Resets the policy expiration clock by the configured Attestation Interval.
-    2. Queries the live Google Workspace Directory API for actual current group membership.
-    3. Cross-references real-time membership against the active requests database.
-    4. **Drift Identification:** Flags **orphaned access** (members added directly via admin console out-of-band) and alerts security teams via webhooks.
-
----
-
-## 6. IAM Roles & Attribute-Based Access Control (ABAC)
-
-### Platform Roles
-
-| Role Badge | Privileges | Scope |
+| Policy Control | Values | Enforcement |
 | :--- | :--- | :--- |
-| `[ ADMIN ]` | Full Read/Write, System Mutation, User Management, Request, Approve | Global / All Spaces |
-| `[ APPROVER ]` | Read-only to configurations; Can approve/deny pending request queues | Assigned Spaces |
-| `[ REQUESTER ]` | Read-only to self dashboard; Can initiate elevation requests | Assigned Spaces |
-| `[ AUDITOR ]` | Read-only access to system logs, policies, and the Security Audit Trail | Global / All Spaces |
+| **Required Tags** | Dynamic ABAC tags (`security`, `oncall`, `cdt`) | Requester must hold **all** specified tags to view or request the group. |
+| **Max TTL** | `30m`, `1h`, `2h`, `4h` | Caps initial lease requests and `+30m` session extensions. |
+| **Custody Quorum** | `1 peer` or `2 peers` | Distinct independent approvals required prior to provisioning. |
+| **Pre-Approved** | Boolean | Provisions immediately upon ABAC validation without manual review. |
+| **Allow Break-Glass** | Boolean | Permits `oncall` / `ADMIN` principals to invoke 30m P0 instant access. |
 
-### ABAC Engine Construction
-*   **Eligible Attributes:** System-wide schema keys declared globally within *System Config* (e.g., `oncall`, `clearance_level`, `region`).
-*   **User Attribute Assignment:** Administrators map specific attribute values to user records. For a user to successfully request a JIT group, their assigned profile attributes must **completely satisfy** the criteria configured on the target group's JIT policy.
+### Multi-Tenant Spaces
+
+Managed Service Providers (MSPs) and multi-domain enterprises can isolate secondary Workspace domains under **Tenant Spaces**. Each Space binds a dedicated `@domain`, delegated operator account, optional Workload Identity service account override, isolated group policies, and tenant-specific webhook routing.
 
 ---
 
-## 7. Health Probes & Operational Monitoring
+## Access Reviews & Drift Remediation
 
-*   **Health Check Endpoint:** `GET /healthz` returns HTTP 200 `{"status": "ok", "timestamp": "..."}` for Cloud Run, Kubernetes, and container orchestration probes.
-*   **Graceful Shutdown:** The server traps `SIGTERM` and `SIGINT` signals to stop accepting new requests, gracefully shut down the background expiration scheduler, and allow in-flight requests to finalize cleanly.
+To satisfy **SOC 2 Type II** and **ISO/IEC 27001** access recertification controls, every group policy tracks `lastCertifiedAt`, `lastCertifiedBy`, and `attestationDueAt`.
 
+1. Navigate to **Governance / Policies & Spaces → Access reviews**.
+2. Click **Certify** on any global or Space group policy to execute live directory reconciliation:
+   * Paginates `admin.members.list` across the Google Workspace group.
+   * Cross-references live directory members against active JIT leases in the database.
+   * Flags any unauthorized standing member (**orphaned access**) bypassing JIT governance and dispatches a security webhook warning.
+3. Click **Remove** next to any flagged orphaned member to invoke one-click `Directory.Members.delete()` remediation (`REMEDIATE_ORPHANED_ACCESS`).
+
+---
+
+## RBAC Role Matrix
+
+| Role | Request Elevation | Approve / Deny Queue | Audit Ledger & CSV | Manage Users & Policies |
+| :--- | :--- | :--- | :--- | :--- |
+| **ADMIN** | Allowed (All Spaces) | Allowed (Independent Peer) | Full Read & Export | Full Read / Write |
+| **APPROVER** | Allowed (Assigned Spaces) | Allowed (Assigned Spaces) | Own Session History | Denied |
+| **REQUESTER** | Allowed (Assigned Spaces) | Denied | Own Session History | Denied |
+| **AUDITOR** | Denied | Denied | Full Read & Export | Denied |
+
+---
+
+## REST & Real-Time API Surface
+
+| Endpoint | Method | Role Guard | Description |
+| :--- | :--- | :--- | :--- |
+| `/healthz` | `GET` | Public Probe | Container liveness & readiness probe (`200 OK`). |
+| `/api/events` | `GET` | Authenticated | Server-Sent Events (SSE) stream for real-time state updates. |
+| `/api/requests` | `GET` / `POST` | Auth / `REQUESTER+` | List scoped leases or submit standard / break-glass requests. |
+| `/api/requests/:id/approve` | `POST` | `APPROVER`, `ADMIN` | Record peer approval (enforces self-approval block & 2-peer quorum). |
+| `/api/requests/:id/deny` | `POST` | `APPROVER`, `ADMIN` | Reject pending request with optional audit review note. |
+| `/api/requests/:id/extend` | `POST` | Owner, `ADMIN` | Extend active non-break-glass lease by `+30m` (max 2x). |
+| `/api/requests/:id/revoke` | `POST` | Owner, `APPROVER+` | Strip directory membership immediately ahead of TTL expiry. |
+| `/api/internal/cron/expire` | `POST` | `X-Cron-Secret` / `ADMIN` | Cloud Scheduler trigger for deterministic multi-instance expiry. |
+| `/api/logs/export` | `GET` | `ADMIN`, `AUDITOR` | Download formula-sanitized RFC-4180 compliance audit CSV. |
