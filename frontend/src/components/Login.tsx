@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import AnimatedLogo from './AnimatedLogo.tsx';
 import { User } from '../types.ts';
-import { Shield, Key, Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
 
 interface LoginProps {
   onLoginSuccess: (token: string, user: User) => void;
@@ -15,14 +15,10 @@ export default function Login({ onLoginSuccess, showToast }: LoginProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const simulationAccounts = [
-    { email: 'superadmin@company.com', name: 'Super Admin', role: 'System Admin', desc: 'Full Access Administrator' }
-  ];
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
-      setError('Please fill in all fields.');
+      setError('Work email and password are required.');
       return;
     }
     setLoading(true);
@@ -36,131 +32,175 @@ export default function Login({ onLoginSuccess, showToast }: LoginProps) {
       });
       const data = await res.json();
       if (res.ok && data.token) {
-        showToast(`Welcome back, ${data.user.name}!`, 'success');
+        showToast(`Authenticated as ${data.user.email}`, 'success');
         onLoginSuccess(data.token, data.user);
       } else {
-        setError(data.error || 'Invalid email or password.');
-        showToast(data.error || 'Authentication failed.', 'error');
+        setError(data.error || 'Authentication failed. Check your credentials.');
       }
-    } catch (err) {
-      setError('Unable to connect to JIT Server.');
-      showToast('Network error during login.', 'error');
+    } catch {
+      setError('Unable to reach the JIT access service.');
+      showToast('Network error during authentication.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleQuickFill = (emailVal: string) => {
-    setEmail(emailVal);
+  const handleQuickFill = () => {
+    setEmail('superadmin@company.com');
     setPassword('password');
     setError('');
   };
 
   return (
-    <div className="login-viewport">
-      <div className="login-card">
-        <div className="login-header">
-          <AnimatedLogo size={48} className="login-logo" />
-          <h2>GWS JIT Access Portal</h2>
-          <p>Self-service Just-In-Time access management for administrative groups</p>
+    <div className="vault-layout">
+      {/* Left Architectural Security Brief */}
+      <aside className="vault-brief">
+        <div className="vault-brand">
+          <AnimatedLogo size={30} />
+          <span className="vault-brand-title">GWS JIT</span>
+          <span className="vault-brand-tag">Workspace PAM</span>
         </div>
 
-        {error && (
-          <div className="login-error-banner">
-            <Shield size={16} />
-            <span>{error}</span>
-          </div>
-        )}
+        <div className="vault-hero">
+          <h1 className="vault-headline">
+            Zero standing privileges for Google Workspace.
+          </h1>
+          <p className="vault-lead">
+            Replace permanent Super Admin assignments with audited, time-bounded group elevations backed by peer quorum and automatic revocation.
+          </p>
 
-        <form onSubmit={handleLogin} className="login-form">
-          <div className="form-input-group">
-            <label htmlFor="email">Work Email</label>
-            <div className="input-with-icon">
-              <Shield size={16} className="field-icon" />
+          <div className="vault-specs">
+            <div className="vault-spec-row">
+              <span className="vault-spec-idx">01</span>
+              <div>
+                <div className="vault-spec-title">Ephemeral Directory Grants</div>
+                <div className="vault-spec-desc">
+                  Memberships are provisioned on demand and stripped deterministically when the TTL expires.
+                </div>
+              </div>
+            </div>
+
+            <div className="vault-spec-row">
+              <span className="vault-spec-idx">02</span>
+              <div>
+                <div className="vault-spec-title">Dual-Custody Quorum & Break-Glass</div>
+                <div className="vault-spec-desc">
+                  Enforce single or two-peer approval policies with incident-bound 30m P0 overrides.
+                </div>
+              </div>
+            </div>
+
+            <div className="vault-spec-row">
+              <span className="vault-spec-idx">03</span>
+              <div>
+                <div className="vault-spec-title">Keyless Workload Identity</div>
+                <div className="vault-spec-desc">
+                  Domain-Wide Delegation assertions signed via GCP IAM Credentials without static JSON keys.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="vault-meta-foot">
+          <span className="led led--emerald" />
+          <span>ADMIN DIRECTORY SDK V1</span>
+          <span>·</span>
+          <span>IMMUTABLE AUDIT LEDGER</span>
+        </div>
+      </aside>
+
+      {/* Right Authentication Form */}
+      <main className="vault-form-pane">
+        <div className="vault-form-box">
+          <div>
+            <div className="eyebrow" style={{ marginBottom: '0.4rem' }}> Operator Authentication </div>
+            <h2 style={{ fontSize: '1.35rem', fontWeight: 700 }}>Sign in to console</h2>
+            <p className="field-hint" style={{ marginTop: '0.25rem' }}>
+              Enter your directory credentials to request or review group elevations.
+            </p>
+          </div>
+
+          {error && (
+            <div className="callout callout--danger" role="alert">
+              <AlertCircle size={14} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLogin}>
+            <div className="field">
+              <label htmlFor="email" className="field-label">Work email</label>
               <input
                 id="email"
                 type="email"
-                className="clean-control"
-                placeholder="you@company.com"
+                className="input"
+                placeholder="operator@company.com"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
             </div>
-          </div>
 
-          <div className="form-input-group" style={{ marginTop: '1rem' }}>
-            <label htmlFor="password">Password</label>
-            <div className="input-with-icon">
-              <Key size={16} className="field-icon" />
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                className="clean-control"
-                placeholder="Enter password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-              <button
-                type="button"
-                className="password-toggle-btn"
-                onClick={() => setShowPassword(!showPassword)}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            className="clean-btn clean-btn-primary"
-            style={{ width: '100%', padding: '0.85rem', marginTop: '1.5rem', fontSize: '0.95rem' }}
-            disabled={loading}
-          >
-            {loading ? 'Authenticating...' : 'Sign In'}
-          </button>
-        </form>
-
-        <div className="login-divider">
-          <span>Simulation Directory Helper</span>
-        </div>
-
-        <div className="simulation-helper-grid" style={{ gridTemplateColumns: '1fr' }}>
-          {simulationAccounts.map((account) => (
-            <button
-              key={account.email}
-              type="button"
-              className="sim-account-card"
-              onClick={() => handleQuickFill(account.email)}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', width: '100%' }}
-            >
-              <div className="sim-account-info" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <span className="sim-account-name" style={{ fontWeight: 700 }}>{account.name}</span>
-                <span className="sim-account-role" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem', border: '1px solid currentColor', borderRadius: '4px' }}>{account.role}</span>
+            <div className="field">
+              <label htmlFor="password" className="field-label">Password</label>
+              <div className="input-wrap">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="input input--with-trail"
+                  placeholder="••••••••••••"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  className="input-trail-btn"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
               </div>
-              <span className="sim-account-desc" style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>{account.desc}</span>
-            </button>
-          ))}
-        </div>
+            </div>
 
-        <div style={{
-          marginTop: '1.25rem',
-          padding: '0.75rem 1rem',
-          background: 'rgba(239, 68, 68, 0.08)',
-          border: '1px solid rgba(239, 68, 68, 0.25)',
-          borderRadius: '8px',
-          fontSize: '0.75rem',
-          color: 'var(--status-denied)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.2rem',
-          lineHeight: '1.4'
-        }}>
-          <strong>⚠️ Security Notice:</strong>
-          <span>The portal has been initialized with a single default Super Admin user. You must change the password immediately under the User Management tab.</span>
+            <button
+              type="submit"
+              className="btn btn-primary btn-block"
+              style={{ marginTop: '1.35rem' }}
+              disabled={loading}
+            >
+              {loading ? 'Verifying credentials...' : 'Sign in'}
+              {!loading && <ArrowRight size={14} />}
+            </button>
+          </form>
+
+          <div className="vault-sandbox-strip">
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--ink-900)' }}>
+                Bootstrap Administrator
+              </div>
+              <div className="text-mono text-muted" style={{ fontSize: '0.69rem' }}>
+                superadmin@company.com
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleQuickFill}
+            >
+              Autofill
+            </button>
+          </div>
+
+          <p className="field-hint" style={{ fontSize: '0.7rem' }}>
+            Rotate the default bootstrap password under <strong>Identities</strong> prior to production deployment, or enforce <code>AUTH_MODE=IAP</code> behind Google Cloud IAP.
+          </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

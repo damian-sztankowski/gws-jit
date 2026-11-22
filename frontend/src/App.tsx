@@ -1,5 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Clock, Settings, Users, ClipboardList, Database, LogOut, RefreshCw, Globe, BookOpen, Download } from 'lucide-react';
+import {
+  RefreshCw,
+  Globe,
+  Download,
+  LogOut,
+  Search,
+  ShieldCheck,
+  FileText,
+  Users,
+  Sliders,
+  BookOpen
+} from 'lucide-react';
 import Dashboard from './components/Dashboard.tsx';
 import Request from './components/Request.tsx';
 import SettingsView from './components/Settings.tsx';
@@ -7,91 +18,88 @@ import UserManagement from './components/UserManagement.tsx';
 import AnimatedLogo from './components/AnimatedLogo.tsx';
 import Login from './components/Login.tsx';
 import Documentation from './components/Documentation.tsx';
-import { AppConfig, JitRequest, User, SpaceConfig } from './types.ts';
+import { AppConfig, JitRequest, User, SpaceConfig, AuditLog } from './types.ts';
+import {
+  getAuthHeaders,
+  getStoredToken,
+  isAuthenticatedSession,
+  setIapSessionActive
+} from './api.ts';
+
+type ViewId = 'dashboard' | 'audit' | 'users' | 'settings' | 'docs';
 
 function App() {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('jit_token'));
+  const [token, setToken] = useState<string | null>(getStoredToken());
   const [user, setUser] = useState<User | null>(null);
-  const [activeView, setActiveView] = useState<'dashboard' | 'users' | 'docs'>('dashboard');
-  const [activeSubTab, setActiveSubTab] = useState<'history' | 'logs'>('history');
-  const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [activeView, setActiveView] = useState<ViewId>('dashboard');
   const [requests, setRequests] = useState<JitRequest[]>([]);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [spaces, setSpaces] = useState<SpaceConfig[]>([]);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [eligibleGroupCount, setEligibleGroupCount] = useState<number>(0);
+  const [sseConnected, setSseConnected] = useState<boolean>(false);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [activeSpaceId, setActiveSpaceId] = useState<string>('global');
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+  const showToast = (
+    message: string,
+    type: 'success' | 'error' | 'info' = 'success'
+  ) => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+    setTimeout(() => setToast(null), 3800);
   };
 
   const fetchConfig = async () => {
-    const activeToken = localStorage.getItem('jit_token');
-    if (!activeToken) return;
+    if (!isAuthenticatedSession()) return;
     try {
-      const res = await fetch('/api/config', {
-        headers: { 'Authorization': `Bearer ${activeToken}` }
-      });
+      const res = await fetch('/api/config', { headers: getAuthHeaders() });
       if (res.ok) {
-        const data = await res.json();
-        setConfig(data);
+        setConfig(await res.json());
       }
-    } catch (err) {
-      showToast("Failed to fetch system configuration.", "error");
+    } catch {
+      showToast('Failed to load system configuration.', 'error');
     }
   };
 
   const fetchRequests = async () => {
-    const activeToken = localStorage.getItem('jit_token');
-    if (!activeToken) return;
+    if (!isAuthenticatedSession()) return;
     try {
-      const res = await fetch('/api/requests', {
-        headers: { 'Authorization': `Bearer ${activeToken}` }
-      });
+      const res = await fetch('/api/requests', { headers: getAuthHeaders() });
       if (res.ok) {
-        const data = await res.json();
-        setRequests(data);
+        setRequests(await res.json());
       }
-    } catch (err) {
-      showToast("Failed to fetch requests.", "error");
+    } catch {
+      showToast('Failed to load requests.', 'error');
     }
   };
 
   const fetchSpaces = async () => {
-    const activeToken = localStorage.getItem('jit_token');
-    if (!activeToken) return;
+    if (!isAuthenticatedSession()) return;
     try {
-      const res = await fetch('/api/spaces', {
-        headers: { 'Authorization': `Bearer ${activeToken}` }
-      });
+      const res = await fetch('/api/spaces', { headers: getAuthHeaders() });
       if (res.ok) {
-        const data = await res.json();
-        setSpaces(data);
+        setSpaces(await res.json());
       }
     } catch (err) {
-      console.error("Failed to fetch spaces list", err);
+      console.error('Failed to fetch spaces', err);
     }
   };
 
   const verifyProfile = async () => {
-    const activeToken = localStorage.getItem('jit_token');
-    const headers: Record<string, string> = {};
-    if (activeToken && activeToken !== 'IAP_SESSION') {
-      headers['Authorization'] = `Bearer ${activeToken}`;
-    }
     try {
-      const res = await fetch('/api/auth/me', { headers });
+      const res = await fetch('/api/auth/me', { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
       } else {
-        handleLogout();
+        await handleLogout(true);
       }
     } catch (err) {
-      console.error("Unable to verify user profile with server.", err);
+      console.error('Unable to verify user profile.', err);
     }
   };
 
@@ -104,67 +112,95 @@ function App() {
         fetchSpaces(),
         verifyProfile()
       ]);
-      setRefreshTrigger(prev => prev + 1);
-      showToast("Data refreshed successfully.", "success");
-    } catch (err) {
-      showToast("Failed to refresh data.", "error");
+      setRefreshTrigger((prev) => prev + 1);
+      showToast('Directory state synchronized.', 'info');
+    } catch {
+      showToast('Synchronization failed.', 'error');
     } finally {
-      setTimeout(() => setIsRefreshing(false), 500);
+      setTimeout(() => setIsRefreshing(false), 350);
     }
   };
 
-  // Check auth status on initial load (handles IAP auto-login)
   useEffect(() => {
     const initializeAuth = async () => {
-      const savedToken = localStorage.getItem('jit_token');
-      const headers: Record<string, string> = {};
-      if (savedToken) {
-        headers['Authorization'] = `Bearer ${savedToken}`;
-      }
-      
       try {
-        const res = await fetch('/api/auth/me', { headers });
+        const res = await fetch('/api/auth/me', { headers: getAuthHeaders() });
         if (res.ok) {
           const data = await res.json();
           setUser(data.user);
           if (data.authMode === 'IAP') {
+            setIapSessionActive(true);
             setToken('IAP_SESSION');
           }
-        } else {
-          if (savedToken) {
-            localStorage.removeItem('jit_token');
-            setToken(null);
-            setUser(null);
-          }
+        } else if (getStoredToken()) {
+          localStorage.removeItem('jit_token');
+          setIapSessionActive(false);
+          setToken(null);
+          setUser(null);
         }
       } catch (err) {
-        console.error("Auth check failed:", err);
+        console.error('Auth initialization failed:', err);
       }
     };
     initializeAuth();
   }, []);
 
   useEffect(() => {
-    if (token) {
-      verifyProfile();
-      fetchConfig();
-      fetchRequests();
-      fetchSpaces();
-      
-      const interval = setInterval(() => {
-        fetchRequests();
-        verifyProfile();
-      }, 5000);
+    if (!token) return;
 
-      return () => clearInterval(interval);
+    verifyProfile();
+    fetchConfig();
+    fetchRequests();
+    fetchSpaces();
+
+    const sseUrl =
+      token !== 'IAP_SESSION'
+        ? `/api/events?token=${encodeURIComponent(token)}`
+        : '/api/events';
+
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource(sseUrl);
+      eventSource.onopen = () => setSseConnected(true);
+      eventSource.onerror = () => setSseConnected(false);
+      eventSource.onmessage = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data);
+          if (parsed.type === 'CONNECTED') {
+            setSseConnected(true);
+          } else if (parsed.type) {
+            fetchRequests();
+            setRefreshTrigger((prev) => prev + 1);
+          }
+        } catch {
+          // Ignore malformed event frames
+        }
+      };
+    } catch {
+      setSseConnected(false);
     }
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchRequests();
+      }
+    }, 12000);
+
+    return () => {
+      clearInterval(interval);
+      eventSource?.close();
+      setSseConnected(false);
+    };
   }, [token]);
 
   useEffect(() => {
     if (user && spaces.length > 0) {
-      const hasGlobalAccess = user.role === 'ADMIN' || (user.assignedSpaces || []).includes('global');
+      const hasGlobalAccess =
+        user.role === 'ADMIN' || (user.assignedSpaces || []).includes('global');
       if (activeSpaceId === 'global' && !hasGlobalAccess) {
-        const accessibleNonGlobal = spaces.filter(s => (user.assignedSpaces || []).includes(s.id));
+        const accessibleNonGlobal = spaces.filter((s) =>
+          (user.assignedSpaces || []).includes(s.id)
+        );
         if (accessibleNonGlobal.length > 0) {
           setActiveSpaceId(accessibleNonGlobal[0].id);
         }
@@ -178,524 +214,568 @@ function App() {
     setUser(loggedInUser);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('jit_token');
+  const handleLogout = async (silent = false) => {
     const isIap = token === 'IAP_SESSION';
+    if (!isIap && getStoredToken()) {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: getAuthHeaders()
+      }).catch(() => {});
+    }
+    localStorage.removeItem('jit_token');
+    setIapSessionActive(false);
     setToken(null);
     setUser(null);
     setConfig(null);
     setRequests([]);
     setSpaces([]);
-    if (isIap) {
-      showToast("To complete log out, please sign out of your Google Workspace account.", "info");
-    } else {
-      showToast("Signed out successfully.", "info");
+    setActiveView('dashboard');
+
+    if (!silent) {
+      if (isIap) {
+        showToast('Sign out of Google Workspace to terminate your IAP session.', 'info');
+      } else {
+        showToast('Session terminated.', 'info');
+      }
     }
+  };
+
+  const renderToast = () => {
+    if (!toast) return null;
+    const ledClass =
+      toast.type === 'error'
+        ? 'led--crimson'
+        : toast.type === 'info'
+          ? 'led--amber'
+          : 'led--emerald';
+    return (
+      <div className="toast" role="status" aria-live="polite">
+        <span className={`led ${ledClass}`} />
+        <span>{toast.message}</span>
+      </div>
+    );
   };
 
   if (!token || !user) {
     return (
       <>
         <Login onLoginSuccess={handleLoginSuccess} showToast={showToast} />
-        {toast && (
-          <div className="clean-toast" style={{
-            borderColor: toast.type === 'error' ? 'var(--status-denied)' : 
-                         toast.type === 'info' ? 'var(--secondary)' : 
-                         'var(--status-active)'
-          }}>
-            {toast.type === 'error' ? <span style={{ color: 'var(--status-denied)' }}>●</span> : 
-             toast.type === 'info' ? <span style={{ color: 'var(--secondary)' }}>●</span> : 
-             <span style={{ color: 'var(--status-active)' }}>●</span>}
-            {toast.message}
-          </div>
-        )}
+        {renderToast()}
       </>
     );
   }
 
-  // Metrics (Filtered by active space)
-  const spaceRequests = requests.filter(r => {
+  const spaceRequests = requests.filter((r) => {
     if (activeSpaceId === 'global') {
       return !r.spaceId;
     }
     return r.spaceId === activeSpaceId;
   });
 
-  const activeCount = spaceRequests.filter(r => r.status === 'ACTIVE').length;
-  const pendingCount = spaceRequests.filter(r => r.status === 'PENDING').length;
+  const activeCount = spaceRequests.filter((r) => r.status === 'ACTIVE').length;
+  const pendingCount = spaceRequests.filter((r) => r.status === 'PENDING').length;
   const totalRequests = spaceRequests.length;
 
-  const accessibleSpaces = user.role === 'ADMIN' 
-    ? spaces 
-    : spaces.filter(s => (user.assignedSpaces || []).includes(s.id));
+  const reviewBadgeCount =
+    user.role === 'ADMIN' || user.role === 'APPROVER'
+      ? requests.filter((r) => r.status === 'PENDING').length
+      : pendingCount;
 
-  const activeSpacePolicies = activeSpaceId === 'global'
-    ? (config?.groupPolicies || [])
-    : (spaces.find(s => s.id === activeSpaceId)?.groupPolicies || []);
+  const accessibleSpaces =
+    user.role === 'ADMIN'
+      ? spaces
+      : spaces.filter((s) => (user.assignedSpaces || []).includes(s.id));
 
-  const activeSpaceObj = spaces.find(s => s.id === activeSpaceId);
+  const activeSpacePolicies =
+    activeSpaceId === 'global'
+      ? config?.groupPolicies || []
+      : spaces.find((s) => s.id === activeSpaceId)?.groupPolicies || [];
+
+  const activeSpaceObj = spaces.find((s) => s.id === activeSpaceId);
+  const activeDomainLabel =
+    activeSpaceId === 'global'
+      ? config?.domain || 'company.com'
+      : activeSpaceObj?.domain || 'space';
+
+  const initials = user.name
+    .split(' ')
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  const canViewAuditLedger = user.role === 'ADMIN' || user.role === 'AUDITOR';
+
+  const breadcrumbMeta: Record<ViewId, { group: string; label: string }> = {
+    dashboard: { group: 'Operations', label: 'Access Control' },
+    audit: {
+      group: 'Operations',
+      label: canViewAuditLedger ? 'Audit Ledger' : 'Session History'
+    },
+    users: { group: 'Governance', label: 'Identities' },
+    settings: { group: 'Governance', label: 'Policies & Spaces' },
+    docs: { group: 'Reference', label: 'Documentation' }
+  };
 
   return (
-    <div className="command-center">
-      {/* Sidebar Navigation */}
-      <aside className="sidebar">
-        <div className="sidebar-top" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div className="sidebar-logo-sec">
-            <AnimatedLogo size={32} />
-            <div className="logo-text">
-              <h1>GWS JIT</h1>
-              <span>Group Access</span>
-            </div>
-          </div>
-
-          {/* Space Switcher */}
-          {spaces.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0 0.2rem' }}>
-              <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>
-                Active Space
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(15, 23, 42, 0.03)', border: '1px solid rgba(15, 23, 42, 0.05)', borderRadius: '8px', padding: '0.4rem 0.6rem' }}>
-                <Globe size={14} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                <select
-                  className="profile-select-control"
-                  style={{ fontSize: '0.8rem', fontWeight: 700, border: 'none', background: 'transparent', outline: 'none', color: 'var(--text-main)', width: '100%', cursor: 'pointer' }}
-                  value={activeSpaceId}
-                  onChange={(e) => setActiveSpaceId(e.target.value)}
-                >
-                  {(user.role === 'ADMIN' || (user.assignedSpaces || []).includes('global')) && (
-                    <option value="global">
-                      Global Config ({config?.domain ? (config.domain.length > 14 ? `${config.domain.substring(0, 11)}...` : config.domain) : 'system'})
-                    </option>
-                  )}
-                  {accessibleSpaces.map(space => {
-                    const displayDomain = space.domain.length > 14 ? `${space.domain.substring(0, 11)}...` : space.domain;
-                    return (
-                      <option key={space.id} value={space.id}>
-                        {space.name} ({displayDomain})
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            </div>
-          )}
-
-          <div className="sidebar-nav">
-            <button 
-              className={`sidebar-nav-btn ${activeView === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setActiveView('dashboard')}
-            >
-              <Clock size={16} />
-              Command Center
-            </button>
-            {user.role === 'ADMIN' && (
-              <button 
-                className={`sidebar-nav-btn ${activeView === 'users' ? 'active' : ''}`}
-                onClick={() => setActiveView('users')}
-              >
-                <Users size={16} />
-                User Accounts
-              </button>
-            )}
-            {user.role === 'ADMIN' && (
-              <button className="sidebar-nav-btn" onClick={() => setShowSettings(true)}>
-                <Settings size={16} />
-                Portal Settings
-              </button>
-            )}
-            <button 
-              className={`sidebar-nav-btn ${activeView === 'docs' ? 'active' : ''}`}
-              onClick={() => setActiveView('docs')}
-            >
-              <BookOpen size={16} />
-              Documentation
-            </button>
-          </div>
-
-          {/* Dynamic Base Privileges based on Role */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
-              Base Privileges ({user.role})
-            </span>
-            <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--card-border)', padding: '0.65rem 0.85rem', borderRadius: '8px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-                {(() => {
-                  const getPrivs = (role: string) => {
-                    switch (role) {
-                      case 'ADMIN':
-                        return [
-                          { name: 'JIT Requesting', status: 'Allowed', active: true },
-                          { name: 'Peer Approval', status: 'Allowed', active: true },
-                          { name: 'User Management', status: 'Allowed', active: true },
-                          { name: 'Security Auditing', status: 'Allowed', active: true },
-                          { name: 'Portal Settings', status: 'Allowed', active: true }
-                        ];
-                      case 'APPROVER':
-                        return [
-                          { name: 'Peer Approval', status: 'Allowed', active: true },
-                          { name: 'JIT Requesting', status: 'Disabled', active: false },
-                          { name: 'User Management', status: 'Disabled', active: false },
-                          { name: 'Security Auditing', status: 'Disabled', active: false },
-                          { name: 'Portal Settings', status: 'Disabled', active: false }
-                        ];
-                      case 'AUDITOR':
-                        return [
-                          { name: 'Security Auditing', status: 'Allowed', active: true },
-                          { name: 'JIT Requesting', status: 'Disabled', active: false },
-                          { name: 'Peer Approval', status: 'Disabled', active: false },
-                          { name: 'User Management', status: 'Disabled', active: false },
-                          { name: 'Portal Settings', status: 'Disabled', active: false }
-                        ];
-                      case 'REQUESTER':
-                      default:
-                        return [
-                          { name: 'JIT Requesting', status: 'Allowed', active: true },
-                          { name: 'Peer Approval', status: 'Disabled', active: false },
-                          { name: 'User Management', status: 'Disabled', active: false },
-                          { name: 'Security Auditing', status: 'Disabled', active: false },
-                          { name: 'Portal Settings', status: 'Disabled', active: false }
-                        ];
-                    }
-                  };
-                  return getPrivs(user.role).map((p) => (
-                    <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ color: p.active ? 'var(--text-main)' : 'var(--text-dim)' }}>{p.name}</span>
-                      <span style={{ 
-                        color: p.active ? 'var(--status-active)' : 'var(--text-dim)', 
-                        fontWeight: p.active ? 600 : 400 
-                      }}>{p.status}</span>
-                    </div>
-                  ));
-                })()}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="sidebar-footer" style={{ borderTop: '1px solid rgba(15, 23, 42, 0.06)', paddingTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="profile-card" style={{ padding: '0.85rem 1rem', background: 'rgba(15, 23, 42, 0.015)', border: '1px solid rgba(15, 23, 42, 0.04)', borderRadius: '8px' }}>
-            <span className="profile-title" style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Logged In User</span>
-            <div style={{ display: 'flex', flexDirection: 'column', marginTop: '0.25rem' }}>
-              <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-main)' }}>{user.name}</span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</span>
-              
-              <span className="badge-clean" style={{
-                alignSelf: 'flex-start',
-                marginTop: '0.4rem',
-                fontSize: '0.65rem',
-                fontWeight: 800,
-                padding: '0.15rem 0.45rem',
-                borderRadius: '4px',
-                background: user.role === 'ADMIN' ? 'var(--status-denied-bg)' : user.role === 'APPROVER' ? 'var(--status-pending-bg)' : user.role === 'AUDITOR' ? 'var(--status-expired-bg)' : 'var(--status-active-bg)',
-                color: user.role === 'ADMIN' ? 'var(--status-denied)' : user.role === 'APPROVER' ? 'var(--status-pending)' : user.role === 'AUDITOR' ? 'var(--status-expired)' : 'var(--status-active)',
-                border: '1px solid currentColor'
-              }}>{user.role}</span>
-            </div>
-
-            {/* User Attributes Parameters display */}
-            <div className="user-attributes-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.6rem', borderTop: '1px dashed rgba(15, 23, 42, 0.08)', paddingTop: '0.6rem' }}>
-              {(user.attributes || []).map((attr) => (
-                <span key={attr} style={{ 
-                  background: attr === 'oncall' ? 'rgba(5, 150, 105, 0.06)' : 
-                              attr === 'cdt' ? 'rgba(79, 70, 229, 0.06)' :
-                              attr === 'security' ? 'rgba(8, 145, 178, 0.06)' :
-                              'rgba(100, 116, 139, 0.06)', 
-                  color: attr === 'oncall' ? 'var(--status-active)' : 
-                         attr === 'cdt' ? 'var(--primary)' :
-                         attr === 'security' ? 'var(--secondary)' :
-                         'var(--status-expired)', 
-                  border: '1px solid currentColor', 
-                  padding: '0.1rem 0.3rem', 
-                  borderRadius: '4px', 
-                  fontSize: '0.65rem', 
-                  fontWeight: 600 
-                }}>{attr}</span>
-              ))}
-              {(!user.attributes || user.attributes.length === 0) && <span style={{ color: 'var(--text-dim)', fontSize: '0.65rem', fontStyle: 'italic' }}>No attributes</span>}
-            </div>
-          </div>
-
-          <button 
-            onClick={handleLogout} 
-            className="clean-btn clean-btn-secondary" 
-            style={{ width: '100%', padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600 }}
+    <div className="console-shell">
+      {/* Precision Left Architectural Rail */}
+      <aside className="console-rail">
+        <div className="rail-top">
+          <button
+            type="button"
+            className="rail-brand"
+            onClick={() => setActiveView('dashboard')}
           >
-            <LogOut size={12} />
-            Sign Out
+            <div className="rail-brand-left">
+              <AnimatedLogo size={28} />
+              <div>
+                <div className="rail-brand-name">GWS JIT</div>
+                <div className="rail-brand-sub">Privileged Access</div>
+              </div>
+            </div>
+            <span className="pill pill-neutral" style={{ fontSize: '0.6rem', padding: '0.08rem 0.35rem' }}>
+              v2.4
+            </span>
           </button>
 
-          <div className={`mode-badge ${config?.mode === 'LIVE' ? 'live' : ''}`}>
-            <Database size={12} />
-            {config?.mode || 'MOCK'} ENGINE
+          {/* Directory Scope Switcher */}
+          <div className="rail-scope-box">
+            <span className="rail-scope-label">Directory Scope</span>
+            <div className="rail-scope-select-wrap">
+              <Globe size={13} style={{ color: 'var(--cobalt-600)', flexShrink: 0 }} />
+              <select
+                aria-label="Active Workspace Scope"
+                className="rail-scope-select"
+                value={activeSpaceId}
+                onChange={(e) => setActiveSpaceId(e.target.value)}
+              >
+                {(user.role === 'ADMIN' ||
+                  (user.assignedSpaces || []).includes('global')) && (
+                  <option value="global">
+                    Global · {config?.domain || 'company.com'}
+                  </option>
+                )}
+                {accessibleSpaces.map((space) => (
+                  <option key={space.id} value={space.id}>
+                    {space.name} · {space.domain}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Primary Navigation Groups */}
+          <nav className="stack-md" aria-label="Console navigation">
+            <div className="rail-section">
+              <div className="rail-section-label">Operations</div>
+              <button
+                type="button"
+                className={`rail-link ${activeView === 'dashboard' ? 'active' : ''}`}
+                onClick={() => setActiveView('dashboard')}
+              >
+                <span className="rail-link-main">
+                  <ShieldCheck size={15} className="rail-link-icon" />
+                  Access Control
+                </span>
+                {reviewBadgeCount > 0 && (
+                  <span className="rail-badge">{reviewBadgeCount}</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                className={`rail-link ${activeView === 'audit' ? 'active' : ''}`}
+                onClick={() => setActiveView('audit')}
+              >
+                <span className="rail-link-main">
+                  <FileText size={15} className="rail-link-icon" />
+                  {canViewAuditLedger ? 'Audit Ledger' : 'Session History'}
+                </span>
+              </button>
+            </div>
+
+            {user.role === 'ADMIN' && (
+              <div className="rail-section">
+                <div className="rail-section-label">Governance</div>
+                <button
+                  type="button"
+                  className={`rail-link ${activeView === 'users' ? 'active' : ''}`}
+                  onClick={() => setActiveView('users')}
+                >
+                  <span className="rail-link-main">
+                    <Users size={15} className="rail-link-icon" />
+                    Identities
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`rail-link ${activeView === 'settings' ? 'active' : ''}`}
+                  onClick={() => setActiveView('settings')}
+                >
+                  <span className="rail-link-main">
+                    <Sliders size={15} className="rail-link-icon" />
+                    Policies & Spaces
+                  </span>
+                </button>
+              </div>
+            )}
+
+            <div className="rail-section">
+              <div className="rail-section-label">Reference</div>
+              <button
+                type="button"
+                className={`rail-link ${activeView === 'docs' ? 'active' : ''}`}
+                onClick={() => setActiveView('docs')}
+              >
+                <span className="rail-link-main">
+                  <BookOpen size={15} className="rail-link-icon" />
+                  Documentation
+                </span>
+              </button>
+            </div>
+          </nav>
+        </div>
+
+        {/* Bottom Telemetry & Operator Card */}
+        <div className="rail-bottom">
+          <div className="rail-telemetry">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span className={`led ${config?.mode === 'LIVE' ? 'led--emerald' : 'led--amber'}`} />
+              {config?.mode || 'MOCK'} ENGINE
+            </span>
+            <span style={{ color: sseConnected ? 'var(--emerald-ink)' : 'var(--ink-400)' }}>
+              {sseConnected ? '● STREAM' : '○ POLL'}
+            </span>
+          </div>
+
+          <div className="rail-user-card">
+            <div className="rail-user-head">
+              <div className="rail-user-id">
+                <span className="user-monogram">{initials || 'OP'}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div className="rail-user-name">{user.name}</div>
+                  <div className="rail-user-email">{user.email}</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => handleLogout(false)}
+                title="Sign out"
+                aria-label="Sign out"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+
+            <div className="rail-user-tags">
+              <span className="pill pill-cobalt" style={{ fontSize: '0.62rem', padding: '0.05rem 0.38rem' }}>
+                {user.role}
+              </span>
+              {(user.attributes || []).map((attr) => (
+                <span key={attr} className="tag-chip" style={{ fontSize: '0.63rem', padding: '0.04rem 0.34rem' }}>
+                  {attr}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       </aside>
 
-      {/* Main Panel Viewport */}
-      <main className="main-viewport">
-        {activeView === 'users' ? (
-          <>
-            <header className="viewport-header">
-              <div className="viewport-info">
-                <h2>User Accounts Administration</h2>
-                <p>Manage user credentials, roles, and eligibility parameters.</p>
+      {/* Inset White Architectural Stage */}
+      <main className="console-stage">
+        <header className="stage-topbar">
+          <div className="stage-crumbs">
+            <span className="stage-crumb-root">{breadcrumbMeta[activeView].group}</span>
+            <span className="stage-crumb-sep">/</span>
+            <span className="stage-crumb-current">{breadcrumbMeta[activeView].label}</span>
+          </div>
+
+          <div className="stage-actions">
+            <span className="tag-chip">@{activeDomainLabel}</span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleManualRefresh}
+              disabled={isRefreshing}
+            >
+              <RefreshCw size={12} className={isRefreshing ? 'spin' : ''} />
+              Sync
+            </button>
+          </div>
+        </header>
+
+        {activeView === 'users' && user.role === 'ADMIN' ? (
+          <div className="stage-body">
+            <div className="page-intro">
+              <div>
+                <h1 className="page-title">Directory Identities</h1>
+                <p className="page-subtitle">
+                  Manage operator roles, ABAC authorization tags, and multi-tenant space assignments.
+                </p>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <button 
-                  className="clean-btn clean-btn-secondary"
-                  onClick={handleManualRefresh}
-                  disabled={isRefreshing}
-                  title="Refresh Data"
-                  style={{ padding: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <RefreshCw size={14} className={isRefreshing ? 'spin-loader' : ''} />
-                </button>
+            </div>
+            <UserManagement
+              currentUser={user}
+              showToast={showToast}
+              refreshTrigger={refreshTrigger}
+              eligibleAttributes={config?.eligibleAttributes || []}
+            />
+          </div>
+        ) : activeView === 'settings' && user.role === 'ADMIN' ? (
+          <div className="stage-body">
+            <div className="page-intro">
+              <div>
+                <h1 className="page-title">Policies & Tenant Spaces</h1>
+                <p className="page-subtitle">
+                  Configure Domain-Wide Delegation, group quorum & TTL bounds, webhooks, and recertification reviews.
+                </p>
               </div>
-            </header>
-            <UserManagement currentUser={user} showToast={showToast} refreshTrigger={refreshTrigger} eligibleAttributes={config?.eligibleAttributes || []} />
-          </>
+            </div>
+            <SettingsView
+              showToast={showToast}
+              onConfigUpdated={() => {
+                fetchConfig();
+                fetchSpaces();
+              }}
+            />
+          </div>
+        ) : activeView === 'audit' ? (
+          <div className="stage-body">
+            <div className="page-intro">
+              <div>
+                <h1 className="page-title">
+                  {canViewAuditLedger ? 'Immutable Security Audit Ledger' : 'Personal Elevation History'}
+                </h1>
+                <p className="page-subtitle">
+                  {canViewAuditLedger
+                    ? 'Cryptographically timestamped record of all privilege requests, peer approvals, break-glass overrides, and revocations.'
+                    : 'Chronological record of your past directory elevation requests in this scope.'}
+                </p>
+              </div>
+            </div>
+            {canViewAuditLedger ? (
+              <AuditTrailView showToast={showToast} refreshTrigger={refreshTrigger} />
+            ) : (
+              <section className="surface-card">
+                <DashboardHistory
+                  currentUser={user}
+                  requests={requests}
+                  activeSpaceId={activeSpaceId}
+                  spaces={spaces}
+                />
+              </section>
+            )}
+          </div>
         ) : activeView === 'docs' ? (
-          <>
-            <header className="viewport-header">
-              <div className="viewport-info">
-                <h2>Portal Documentation</h2>
-                <p>Read setup guides, architecture details, and configuration instructions.</p>
+          <div className="stage-body">
+            <div className="page-intro">
+              <div>
+                <h1 className="page-title">Architecture & Operations Manual</h1>
+                <p className="page-subtitle">
+                  Workload Identity setup, Domain-Wide Delegation scopes, and operator procedures.
+                </p>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <button 
-                  className="clean-btn clean-btn-secondary"
-                  onClick={handleManualRefresh}
-                  disabled={isRefreshing}
-                  title="Refresh Data"
-                  style={{ padding: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <RefreshCw size={14} className={isRefreshing ? 'spin-loader' : ''} />
-                </button>
-              </div>
-            </header>
+            </div>
             <Documentation />
-          </>
+          </div>
         ) : (
           <>
-            <header className="viewport-header">
-              <div className="viewport-info">
-                <h2>Access Command Center ({activeSpaceId === 'global' ? 'Global Config' : activeSpaceObj?.name})</h2>
-                <p>Request and review temporary memberships in Workspace groups under {activeSpaceId === 'global' ? 'Global settings' : `Space: ${activeSpaceObj?.name}`}.</p>
-              </div>
-              
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <button 
-                  className="clean-btn clean-btn-secondary"
-                  onClick={handleManualRefresh}
-                  disabled={isRefreshing}
-                  title="Refresh Data"
-                  style={{ padding: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <RefreshCw size={14} className={isRefreshing ? 'spin-loader' : ''} />
-                </button>
-                {user.role === 'ADMIN' && (
-                  <button className="clean-btn clean-btn-secondary" onClick={() => setShowSettings(true)}>
-                    <Settings size={14} />
-                    Settings
-                  </button>
-                )}
-              </div>
-            </header>
-
-            {/* Metrics Row */}
-            <section className="metrics-row">
-              <div className="metric-card">
-                <div className="metric-icon-wrapper" style={{ color: 'var(--status-active)' }}>
-                  <Clock size={20} />
-                </div>
-                <div className="metric-details">
-                  <span>Active Elevations</span>
-                  <h3>{activeCount}</h3>
-                </div>
+            {/* Full-Bleed Architectural Telemetry Ribbon */}
+            <section className="telemetry-ribbon" aria-label="Operational telemetry">
+              <div className="telemetry-cell">
+                <span className="telemetry-label">
+                  <span className="led led--emerald" />
+                  Active Grants
+                </span>
+                <span className="telemetry-value">{activeCount}</span>
+                <span className="telemetry-sub">Time-bounded directory leases</span>
               </div>
 
-              <div className="metric-card">
-                <div className="metric-icon-wrapper" style={{ color: 'var(--status-pending)' }}>
-                  <Users size={20} />
-                </div>
-                <div className="metric-details">
-                  <span>Pending Review</span>
-                  <h3>{pendingCount}</h3>
-                </div>
+              <div className="telemetry-cell">
+                <span className="telemetry-label">
+                  <span className="led led--amber" />
+                  Custody Queue
+                </span>
+                <span className="telemetry-value">{pendingCount}</span>
+                <span className="telemetry-sub">Awaiting peer verification</span>
               </div>
 
-              <div className="metric-card">
-                <div className="metric-icon-wrapper" style={{ color: 'var(--primary)' }}>
-                  <ClipboardList size={20} />
-                </div>
-                <div className="metric-details">
-                  <span>Total Requests</span>
-                  <h3>{totalRequests}</h3>
-                </div>
+              <div className="telemetry-cell">
+                <span className="telemetry-label">
+                  <span className="led" style={{ background: 'var(--cobalt-500)' }} />
+                  Eligible Groups
+                </span>
+                <span className="telemetry-value">
+                  {user.role === 'AUDITOR' ? activeSpacePolicies.length : eligibleGroupCount}
+                </span>
+                <span className="telemetry-sub">Matched via ABAC tags</span>
+              </div>
+
+              <div className="telemetry-cell">
+                <span className="telemetry-label">
+                  <span className="led led--slate" />
+                  Scope Ledger
+                </span>
+                <span className="telemetry-value">{totalRequests}</span>
+                <span className="telemetry-sub">Total requests in scope</span>
               </div>
             </section>
 
-            {/* Grid Area: Request form left, Active elevations right */}
-            <div className="dashboard-workspace-grid" style={(user.role === 'AUDITOR' || user.role === 'APPROVER') ? { gridTemplateColumns: '1fr' } : undefined}>
-              {/* Left panel: JIT request form */}
-              {!(user.role === 'AUDITOR' || user.role === 'APPROVER') && (
-                <Request 
-                  currentUser={user} 
-                  showToast={showToast} 
-                  onSuccess={fetchRequests} 
-                  activeSpaceId={activeSpaceId}
-                  activeSpacePolicies={activeSpacePolicies}
-                />
+            {/* Full-Bleed 2-Column Architectural Split */}
+            <div
+              className={`console-split ${
+                user.role === 'AUDITOR' ? 'console-split--single' : ''
+              }`}
+            >
+              {user.role !== 'AUDITOR' && (
+                <div className="split-composer">
+                  <Request
+                    currentUser={user}
+                    showToast={showToast}
+                    onSuccess={fetchRequests}
+                    activeSpaceId={activeSpaceId}
+                    activeSpacePolicies={activeSpacePolicies}
+                    onEligibleCountChange={setEligibleGroupCount}
+                  />
+                </div>
               )}
 
-              {/* Right panel: Active/Pending listings */}
-              <Dashboard 
-                currentUser={user} 
-                requests={requests}
-                fetchRequests={fetchRequests}
-                showToast={showToast} 
-                activeSpaceId={activeSpaceId}
-                spaces={spaces}
-              />
-            </div>
+              <div className="split-Feed">
+                <Dashboard
+                  currentUser={user}
+                  requests={requests}
+                  fetchRequests={fetchRequests}
+                  showToast={showToast}
+                  activeSpaceId={activeSpaceId}
+                  spaces={spaces}
+                  globalPolicies={config?.groupPolicies || []}
+                />
 
-            {/* Bottom Panel: History & Logs */}
-            <section className="panel-card" style={{ marginTop: '0.5rem' }}>
-              {(user.role === 'ADMIN' || user.role === 'AUDITOR') ? (
-                <>
-                  <div className="panel-header" style={{ borderBottom: 'none' }}>
-                    <div className="tabs-navigation">
-                      <button 
-                        className={`tab-nav-item ${activeSubTab === 'history' ? 'active' : ''}`}
-                        onClick={() => setActiveSubTab('history')}
-                      >
-                        My Elevation History
-                      </button>
-                      <button 
-                        className={`tab-nav-item ${activeSubTab === 'logs' ? 'active' : ''}`}
-                        onClick={() => setActiveSubTab('logs')}
-                      >
-                        Central Security Audit Trail
-                      </button>
+                <section className="feed-block">
+                  <div className="block-header">
+                    <div>
+                      <h3 className="card-title">Recent elevation history</h3>
+                      <p className="card-subtitle">Completed, expired, revoked, and rejected sessions for your identity</p>
                     </div>
                   </div>
-
-                  <div className="panel-body" style={{ paddingTop: 0 }}>
-                    {activeSubTab === 'history' ? (
-                      <DashboardHistory currentUser={user} requests={requests} activeSpaceId={activeSpaceId} spaces={spaces} />
-                    ) : (
-                      <AuditTrailView showToast={showToast} refreshTrigger={refreshTrigger} />
-                    )}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="panel-header">
-                    <h3>
-                      <ClipboardList className="logo-icon" size={16} />
-                      My Elevation History
-                    </h3>
-                  </div>
-                  <div className="panel-body">
-                    <DashboardHistory currentUser={user} requests={requests} activeSpaceId={activeSpaceId} spaces={spaces} />
-                  </div>
-                </>
-              )}
-            </section>
+                  <DashboardHistory
+                    currentUser={user}
+                    requests={requests}
+                    activeSpaceId={activeSpaceId}
+                    spaces={spaces}
+                  />
+                </section>
+              </div>
+            </div>
           </>
         )}
       </main>
 
-      {/* Settings Modal Overlay */}
-      {showSettings && user.role === 'ADMIN' && (
-        <SettingsView 
-          showToast={showToast} 
-          onConfigUpdated={() => { fetchConfig(); fetchSpaces(); }}
-          onClose={() => setShowSettings(false)}
-        />
-      )}
-
-      {/* Alert toast notifications */}
-      {toast && (
-        <div className="clean-toast" style={{
-          borderColor: toast.type === 'error' ? 'var(--status-denied)' : 
-                       toast.type === 'info' ? 'var(--secondary)' : 
-                       'var(--status-active)'
-        }}>
-          {toast.type === 'error' ? <span style={{ color: 'var(--status-denied)' }}>●</span> : 
-           toast.type === 'info' ? <span style={{ color: 'var(--secondary)' }}>●</span> : 
-           <span style={{ color: 'var(--status-active)' }}>●</span>}
-          {toast.message}
-        </div>
-      )}
+      {renderToast()}
     </div>
   );
 }
 
-// Subcomponent to list history
-function DashboardHistory({ currentUser, requests, activeSpaceId, spaces }: { currentUser: User; requests: JitRequest[]; activeSpaceId: string; spaces: SpaceConfig[] }) {
-  const userRequests = requests.filter(r => r.requesterEmail.toLowerCase() === currentUser.email.toLowerCase());
-  const spaceRequests = userRequests.filter(r => {
+function DashboardHistory({
+  currentUser,
+  requests,
+  activeSpaceId,
+  spaces
+}: {
+  currentUser: User;
+  requests: JitRequest[];
+  activeSpaceId: string;
+  spaces: SpaceConfig[];
+}) {
+  const userRequests = requests.filter(
+    (r) => r.requesterEmail.toLowerCase() === currentUser.email.toLowerCase()
+  );
+  const spaceRequests = userRequests.filter((r) => {
     if (activeSpaceId === 'global') {
       return !r.spaceId;
     }
     return r.spaceId === activeSpaceId;
   });
-  const historyRequests = spaceRequests.filter(r => r.status !== 'ACTIVE');
+  const historyRequests = spaceRequests.filter((r) => r.status !== 'ACTIVE');
 
-  const renderStatus = (status: JitRequest['status']) => {
-    return <span className={`badge-clean badge-clean-${status.toLowerCase()}`}>{status}</span>;
+  const statusPillClass = (status: JitRequest['status']) => {
+    switch (status) {
+      case 'PENDING':
+        return 'pill-pending';
+      case 'APPROVED':
+        return 'pill-active';
+      case 'DENIED':
+        return 'pill-denied';
+      case 'REVOKED':
+        return 'pill-revoked';
+      default:
+        return 'pill-expired';
+    }
   };
 
   if (historyRequests.length === 0) {
     return (
-      <div className="empty-view">
-        <ClipboardList size={28} />
-        <p>No historical JIT requests found for your profile in this Space.</p>
+      <div className="empty-state">
+        <div className="empty-state-title">No historical records</div>
+        <span>Past elevation leases for your principal will appear here.</span>
       </div>
     );
   }
 
   return (
-    <div className="aesthetic-table-wrapper">
-      <table className="aesthetic-table">
+    <div className="table-wrap">
+      <table className="data-table">
         <thead>
           <tr>
-            <th>Group Name</th>
-            <th>Requested Date</th>
-            <th>Duration</th>
+            <th>Group</th>
+            <th>Timestamp</th>
+            <th>TTL</th>
             <th>Status</th>
-            <th>Reason / Details</th>
+            <th>Audit Context</th>
           </tr>
         </thead>
         <tbody>
-          {historyRequests.map(req => (
+          {historyRequests.map((req) => (
             <tr key={req.id}>
-              <td style={{ fontWeight: 600 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  {req.groupName}
-                  <span style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '0.1rem 0.4rem',
-                    borderRadius: '9999px',
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    background: 'rgba(79, 70, 229, 0.08)',
-                    border: '1px solid rgba(79, 70, 229, 0.15)',
-                    color: 'var(--primary)'
-                  }}>
-                    {spaces.find(s => s.id === req.spaceId)?.name || 'Global Config'}
+              <td>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 600 }}>{req.groupName}</span>
+                  <span className="pill pill-neutral">
+                    {spaces.find((s) => s.id === req.spaceId)?.name || 'Global'}
                   </span>
+                  {req.isBreakGlass && (
+                    <span className="pill pill-denied">BREAK-GLASS</span>
+                  )}
+                  {req.ticketId && (
+                    <span className="tag-chip">{req.ticketId}</span>
+                  )}
+                </div>
+                <div className="text-mono text-muted" style={{ fontSize: '0.69rem', marginTop: '0.1rem' }}>
+                  {req.groupEmail}
                 </div>
               </td>
-              <td style={{ color: 'var(--text-muted)' }}>{new Date(req.requestedAt).toLocaleString()}</td>
-              <td style={{ color: 'var(--text-muted)' }}>{req.durationMinutes}m</td>
-              <td>{renderStatus(req.status)}</td>
-              <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                {req.status === 'DENIED' ? `Denied by ${req.approverEmail}` : req.justification}
+              <td className="text-mono text-muted tabular" style={{ whiteSpace: 'nowrap' }}>
+                {new Date(req.requestedAt).toISOString().replace('T', ' ').slice(0, 19)}
+              </td>
+              <td className="text-mono text-muted tabular">{req.durationMinutes}m</td>
+              <td>
+                <span className={`pill ${statusPillClass(req.status)}`}>
+                  {req.status}
+                </span>
+              </td>
+              <td className="text-muted">
+                <div>
+                  {req.status === 'DENIED' && req.approverEmail
+                    ? `Rejected by ${req.approverEmail}`
+                    : req.justification}
+                </div>
+                {req.reviewNote && (
+                  <div style={{ fontSize: '0.72rem', marginTop: '0.15rem' }}>
+                    Reviewer note: {req.reviewNote}
+                  </div>
+                )}
               </td>
             </tr>
           ))}
@@ -705,60 +785,53 @@ function DashboardHistory({ currentUser, requests, activeSpaceId, spaces }: { cu
   );
 }
 
-function AuditTrailView({ showToast, refreshTrigger }: { showToast: any; refreshTrigger: any }) {
-  interface AuditLog {
-    id: string;
-    timestamp: string;
-    actor: string;
-    action: string;
-    details: string;
-  }
-
+function AuditTrailView({
+  showToast,
+  refreshTrigger
+}: {
+  showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  refreshTrigger: number;
+}) {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<'ALL' | 'REQUEST' | 'APPROVE' | 'REVOKE' | 'CONFIG'>('ALL');
 
   const handleExport = async () => {
-    const activeToken = localStorage.getItem('jit_token');
-    if (!activeToken) return;
     try {
-      showToast("Preparing audit logs CSV export...", "info");
+      showToast('Generating RFC-4180 CSV export...', 'info');
       const res = await fetch('/api/logs/export', {
-        headers: { 'Authorization': `Bearer ${activeToken}` }
+        headers: getAuthHeaders()
       });
       if (res.ok) {
         const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `gws-jit-audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.download = `gws-jit-audit-ledger-${new Date().toISOString().slice(0, 10)}.csv`;
         document.body.appendChild(a);
         a.click();
         a.remove();
         window.URL.revokeObjectURL(url);
-        showToast("Audit logs exported successfully.", "success");
+        showToast('Audit ledger exported.', 'success');
       } else {
-        showToast("Failed to export audit logs.", "error");
+        showToast('Failed to export audit ledger.', 'error');
       }
-    } catch (err) {
-      showToast("Error downloading audit logs export.", "error");
+    } catch {
+      showToast('Error downloading CSV export.', 'error');
     }
   };
 
   const fetchLogs = async () => {
-    const activeToken = localStorage.getItem('jit_token');
-    if (!activeToken) return;
     try {
-      const res = await fetch('/api/logs', {
-        headers: { 'Authorization': `Bearer ${activeToken}` }
-      });
+      const res = await fetch('/api/logs', { headers: getAuthHeaders() });
       if (res.ok) {
-        const data = await res.json();
-        setLogs(data);
+        setLogs(await res.json());
       } else {
-        showToast("Access Denied. You do not have permissions to view audit logs.", "error");
+        showToast('Insufficient permissions to read audit ledger.', 'error');
       }
-    } catch (err) {
-      showToast("Failed to fetch logs.", "error");
+    } catch {
+      showToast('Failed to fetch audit ledger.', 'error');
     } finally {
       setLoading(false);
     }
@@ -768,80 +841,121 @@ function AuditTrailView({ showToast, refreshTrigger }: { showToast: any; refresh
     fetchLogs();
   }, [refreshTrigger]);
 
-  const renderLogAction = (action: string) => {
-    let cls = 'action-system';
-    if (action.includes('REQUEST')) cls = 'action-request';
-    if (action.includes('APPROVE')) cls = 'action-approve';
-    if (action.includes('DENY')) cls = 'action-deny';
-    if (action.includes('REVOKE')) cls = 'action-revoke';
-    
-    return <span className={`log-action-badge ${cls}`}>{action.replace('_', ' ')}</span>;
+  const actionPillClass = (action: string) => {
+    if (action.includes('BREAK_GLASS')) return 'pill-denied';
+    if (action.includes('APPROVE') || action.includes('ACTIVATE') || action.includes('EXTEND') || action.includes('REMEDIATE')) {
+      return 'pill-active';
+    }
+    if (action.includes('REQUEST')) return 'pill-pending';
+    if (action.includes('DENY') || action.includes('REVOKE') || action.includes('ERROR') || action.includes('ORPHAN')) {
+      return 'pill-denied';
+    }
+    return 'pill-neutral';
   };
 
-  if (loading) {
-    return <div className="empty-view">Retrieving audit logs...</div>;
-  }
+  const filteredLogs = logs.filter((log) => {
+    const matchesCategory =
+      category === 'ALL' ||
+      (category === 'REQUEST' && (log.action.includes('REQUEST') || log.action.includes('BREAK_GLASS'))) ||
+      (category === 'APPROVE' && (log.action.includes('APPROVE') || log.action.includes('ACTIVATE') || log.action.includes('EXTEND'))) ||
+      (category === 'REVOKE' && (log.action.includes('REVOKE') || log.action.includes('DENY') || log.action.includes('REMEDIATE'))) ||
+      (category === 'CONFIG' && (log.action.includes('CONFIG') || log.action.includes('SPACE') || log.action.includes('USER') || log.action.includes('ATTEST')));
 
-  if (logs.length === 0) {
+    if (!matchesCategory) return false;
+    if (!query.trim()) return true;
+    const q = query.toLowerCase();
     return (
-      <div className="empty-view">
-        <ClipboardList size={28} />
-        <p>No audit logs recorded in the system.</p>
-      </div>
+      log.actor.toLowerCase().includes(q) ||
+      log.action.toLowerCase().includes(q) ||
+      log.details.toLowerCase().includes(q)
+    );
+  });
+
+  if (loading) {
+    return (
+      <section className="surface-card">
+        <div className="empty-state">
+          <span>Loading audit ledger...</span>
+        </div>
+      </section>
     );
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.8rem' }}>
-        <button 
-          onClick={handleExport}
-          className="btn btn-secondary" 
-          style={{ 
-            fontSize: '0.75rem', 
-            padding: '0.35rem 0.75rem', 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '0.35rem',
-            background: 'var(--bg-glass)',
-            border: '1px solid var(--border-color)',
-            color: 'var(--text-muted)'
-          }}
-        >
-          <Download size={14} /> Export Logs (CSV)
+    <section className="surface-card">
+      <div className="card-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', flex: 1 }}>
+          <div className="input-wrap" style={{ maxWidth: '280px' }}>
+            <Search size={14} className="input-icon" />
+            <input
+              type="text"
+              className="input input--with-icon"
+              style={{ height: '32px', fontSize: '0.79rem' }}
+              placeholder="Search principal, event, or ticket..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="segmented" role="group" aria-label="Filter by event category">
+            {(['ALL', 'REQUEST', 'APPROVE', 'REVOKE', 'CONFIG'] as const).map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                className={`segmented-btn ${category === cat ? 'active' : ''}`}
+                style={{ height: '26px', fontSize: '0.72rem', padding: '0 0.55rem' }}
+                onClick={() => setCategory(cat)}
+              >
+                {cat === 'ALL' ? 'All' : cat.charAt(0) + cat.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button type="button" className="btn btn-secondary btn-sm" onClick={handleExport}>
+          <Download size={13} />
+          Export CSV
         </button>
       </div>
-      <div className="aesthetic-table-wrapper" style={{ maxHeight: '350px', overflowY: 'auto' }}>
-        <table className="aesthetic-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-        <tbody>
-          {logs.map(log => (
-            <tr key={log.id}>
-              <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>
-                {new Date(log.timestamp).toLocaleTimeString()}
-              </td>
-              <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>
-                {log.actor.split('@')[0]}
-              </td>
-              <td>
-                {renderLogAction(log.action)}
-              </td>
-              <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                {log.details}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-    </div>
+
+      {filteredLogs.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-title">No matching ledger entries</div>
+          <span>Adjust your search query or event category filter.</span>
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>UTC Timestamp</th>
+                <th>Principal</th>
+                <th>Event Type</th>
+                <th>Ledger Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredLogs.map((log) => (
+                <tr key={log.id}>
+                  <td className="text-mono text-muted tabular" style={{ whiteSpace: 'nowrap' }}>
+                    {new Date(log.timestamp).toISOString().replace('T', ' ').slice(0, 19)}Z
+                  </td>
+                  <td className="text-mono" style={{ fontWeight: 500 }}>
+                    {log.actor}
+                  </td>
+                  <td>
+                    <span className={`pill ${actionPillClass(log.action)}`}>
+                      {log.action}
+                    </span>
+                  </td>
+                  <td className="text-muted">{log.details}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -8,7 +8,7 @@ Instead of keeping permanent standing privileges (such as standing "Super Admin"
 
 ---
 
-## ⚡ 3-Minute Quickstart
+## 3-Minute Quickstart
 
 Evaluate the portal locally in **MOCK** mode in seconds:
 
@@ -43,20 +43,20 @@ Navigate to **http://localhost:3000** (or `http://localhost:8080` for Docker). D
 
 ## Key Features
 
-- **Self-Service Requests:** Choose a role (Super Admin, User Admin, etc.), justify the business need, and select activation durations (e.g. 30m, 1h, 2h).
-- **Dual-Custody Approvals:** Enforce peer approvals. Requesters cannot approve their own requests.
-- **Auto-Revocation Engine:** A background scheduler automatically polls active sessions and revokes Workspace privileges immediately upon expiration.
-- **Enterprise-Ready Architecture:** Suppress local credentials screens and run secure corporate Single Sign-On (SSO) using Google Cloud Identity-Aware Proxy (IAP).
-- **Multi-Storage Support:** Switch seamlessly between a local JSON file database (dev) and a fully managed Google Cloud Firestore database (production).
-- **Central Security Audit Trail:** Clear logging of every JIT request, approval, rejection, activation, and expiration.
-- **Ready for Google Workspace Admin SDK:** Live mode executes actual directory membership changes using a GCP Service Account with Domain-Wide Delegation.
+- **Self-Service Requests & Ticket Tracking:** Choose an eligible group, attach an incident/ticket ID (`INC-1234`), justify the business need, and select policy-bounded durations (30m–4h) with `+30m` live session extensions.
+- **Dual-Custody & Tier-0 Peer Quorum:** Enforce 1-peer or 2-peer independent approvals with reviewer notes; requesters can never approve their own requests.
+- **Emergency Break-Glass Mode:** Eligible on-call responders can activate strict 30-minute break-glass access with mandatory incident ticket tracking and immediate high-priority webhook alerts.
+- **Auto-Revocation & One-Click Orphan Remediation:** Transactional scheduler revokes expired memberships automatically, while Access Reviews detect and remove unauthorized standing members in one click.
+- **Enterprise-Ready Architecture:** Zero-trust corporate Single Sign-On (SSO) via Google Cloud Identity-Aware Proxy (IAP), Cloud Armor WAF, and keyless Workload Identity Federation (`signJwt`).
+- **Multi-Storage & Real-Time Stream:** Local JSON database (dev) or Google Cloud Firestore (prod) paired with Server-Sent Events (`/api/events`) for instant UI synchronization.
+- **Central Security Audit Trail:** Searchable, filterable compliance log with formula-safe CSV export.
 
 ---
 
 ## Tech Stack
 
-- **Frontend:** React, Vite, TypeScript, Vanilla CSS (Glassmorphism Dark Theme, Outfit/Inter typography, Lucide Icons)
-- **Backend:** Node.js, Express, TypeScript, Google APIs Client (`googleapis`, `@google-cloud/firestore`, `google-auth-library`)
+- **Frontend:** React, Vite, TypeScript, Vanilla CSS (Light Modern Minimalist Design System, Inter typography, native `<dialog>` modals, Lucide Icons)
+- **Backend:** Node.js, Express, TypeScript, Zod, Google APIs Client (`googleapis`, `@google-cloud/firestore`, `google-auth-library`)
 - **Containerization:** Multi-stage Docker packaging (React build, TS compilation, and minimal runner)
 - **Local Dev Engine:** `tsx` watch, `concurrently` for running dev servers
 
@@ -401,22 +401,17 @@ The portal enforces strict Role-Based Access Control both in the frontend UI and
    - **Base Privileges**: JIT Requesting (`Allowed`), Peer Approval (`Allowed`), User Management (`Allowed`), Security Auditing (`Allowed`), Portal Settings (`Allowed`).
    - **UI Views**: Access to all panels: Command Center (with request form), User Accounts tab, and Portal Settings modal. Can view and modify all tenant Spaces.
 2. **APPROVER**:
-   - **Base Privileges**: Peer Approval (`Allowed`), JIT Requesting (`Disabled`), User Management (`Disabled`), Security Auditing (`Disabled`), Portal Settings (`Disabled`).
-   - **UI Views**: View of active and pending requests across all spaces (unfiltered by selected space, excluding self-requests). The JIT request form panel is hidden, and the dashboard automatically scales to full-width.
+   - **Capabilities**: Can submit JIT elevation requests for eligible groups and peer-approve/deny independent requests in assigned Spaces (self-approval is strictly blocked).
 3. **REQUESTER**:
-   - **Base Privileges**: JIT Requesting (`Allowed`), Peer Approval (`Disabled`), User Management (`Disabled`), Security Auditing (`Disabled`), Portal Settings (`Disabled`).
-   - **UI Views**: View of the JIT request form panel, and a dashboard showing only their own active, pending, and historical requests.
+   - **Capabilities**: Can submit JIT elevation requests, extend eligible active sessions, and early-revoke their own sessions.
 4. **AUDITOR**:
-   - **Base Privileges**: Security Auditing (`Allowed`), JIT Requesting (`Disabled`), Peer Approval (`Disabled`), User Management (`Disabled`), Portal Settings (`Disabled`).
-   - **UI Views**: Access to the Central Security Audit Trail tab. The JIT request form panel is hidden, and the dashboard scales to full-width.
-
-*Note: The **Base Privileges** card in the left sidebar updates dynamically to show the specific allowed and disabled capabilities for the currently logged-in user.*
+   - **Capabilities**: Read-only compliance access to active/historical elevations and the Central Security Audit Trail (with CSV export).
 
 ---
 
 ## In-App Documentation Viewer
 
-A dedicated **Documentation** tab (using the `BookOpen` icon) is accessible to all logged-in users in the left sidebar. This pulls this setup guide directly from the backend, parsing and rendering it using a custom-built markdown engine styled to match the dark glassmorphic design system.
+A dedicated **Docs** view in the top navigation bar is accessible to all signed-in users, rendering the operational manual and deployment reference in clean, minimalist editorial typography.
 
 ---
 
@@ -463,7 +458,7 @@ To satisfy enterprise security compliance requirements (such as SOC2, ISO 27001)
 ### 1. Attestation Policy Configuration
 - In **Settings > System Config**, set the **Access Review Attestation Interval (Days)** (e.g. 90 days).
 - Every group policy keeps track of its last certified timestamp and next due date.
-- If a group policy's due date is exceeded, a warning badge `⚠️ Policy Access Review is Overdue` is displayed to users in the Request Portal when selecting that group.
+- If a group policy's due date is exceeded, an overdue recertification callout is displayed to operators in the request composer when selecting that group.
 
 ### 2. Conducting Reviews & Orphaned Access Detection
 - Administrators can navigate to the **Settings > Access Reviews** tab to view all configured JIT policies grouped by space context.

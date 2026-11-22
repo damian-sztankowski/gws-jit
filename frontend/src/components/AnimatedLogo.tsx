@@ -3,73 +3,54 @@ interface AnimatedLogoProps {
   className?: string;
 }
 
-export default function AnimatedLogo({ size = 32, className = '' }: AnimatedLogoProps) {
+export default function AnimatedLogo({ size = 28, className = '' }: AnimatedLogoProps) {
   return (
-    <div className={`logo-container ${className}`} style={{ width: size, height: size }}>
+    <div
+      className={`brand-emblem ${className}`.trim()}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
       <svg
-        viewBox="0 0 32 32"
-        width="100%"
-        height="100%"
+        viewBox="0 0 28 28"
+        width={size}
+        height={size}
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <defs>
-          <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="var(--primary)" />
-            <stop offset="100%" stopColor="var(--secondary)" />
-          </linearGradient>
-          <linearGradient id="shackleGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="var(--secondary)" />
-            <stop offset="100%" stopColor="var(--accent)" />
-          </linearGradient>
-        </defs>
-
-        {/* Outer Rotating Timer Ring */}
-        <circle
-          className="logo-outer-ring"
-          cx="16"
-          cy="16"
-          r="14"
-          stroke="url(#logoGrad)"
+        <rect width="28" height="28" rx="7" fill="url(#emblemBg)" />
+        <rect
+          x="0.5"
+          y="0.5"
+          width="27"
+          height="27"
+          rx="6.5"
+          stroke="rgba(255,255,255,0.14)"
+        />
+        <path
+          d="M14 5.75L20.5 8.65V13.9C20.5 18.15 17.72 21.55 14 22.75C10.28 21.55 7.5 18.15 7.5 13.9V8.65L14 5.75Z"
+          stroke="#FFFFFF"
           strokeWidth="1.5"
-          strokeDasharray="6 6"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M14 9.5A4.25 4.25 0 0 1 18.25 13.75"
+          stroke="#60A5FA"
+          strokeWidth="1.5"
           strokeLinecap="round"
         />
-
-        {/* Outer Subtle Pulse Ring */}
-        <circle
-          cx="16"
-          cy="16"
-          r="11"
-          stroke="var(--primary-glow)"
-          strokeWidth="0.75"
-          strokeDasharray="20 4"
+        <circle cx="14" cy="13.75" r="1.75" fill="#60A5FA" />
+        <path
+          d="M14 15.5V18.25"
+          stroke="#FFFFFF"
+          strokeWidth="1.5"
+          strokeLinecap="round"
         />
-
-        {/* Shield and Lock Body Group */}
-        <g className="logo-shield-group">
-          {/* Lock Shackle (JIT Access Indicator) */}
-          <path
-            className="logo-shackle"
-            d="M11 15V11C11 8.23858 13.2386 6 16 6C18.7614 6 21 8.23858 21 11V15"
-            stroke="url(#shackleGrad)"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-
-          {/* Shield Base (Lock Body) */}
-          <path
-            d="M7 13.5V17.5C7 22.5 16 26.5 16 26.5C16 26.5 25 22.5 25 17.5V13.5L16 10L7 13.5Z"
-            fill="url(#logoGrad)"
-            stroke="var(--primary)"
-            strokeWidth="1"
-            strokeLinejoin="round"
-          />
-
-          {/* Inner Glowing Keyhole */}
-          <circle cx="16" cy="17" r="2" fill="#ffffff" />
-          <path d="M15 18.5H17L17.5 22H14.5L15 18.5Z" fill="#ffffff" />
-        </g>
+        <defs>
+          <linearGradient id="emblemBg" x1="14" y1="0" x2="14" y2="28" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#1E293B" />
+            <stop offset="1" stopColor="#0B1220" />
+          </linearGradient>
+        </defs>
       </svg>
     </div>
   );
